@@ -1,0 +1,11 @@
+[package]
+name = "lang"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+num = "0.4.3"
+enumkit = "0.0.1"
+serde = { version = "1.0.228", features = ["derive"] }
+music_primitives = { path = "../music_primitives" }
+rand = "0.9"

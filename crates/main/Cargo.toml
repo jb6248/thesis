@@ -1,0 +1,7 @@
+[package]
+name = "thesis"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+music_primitives = { path = "../music_primitives" }

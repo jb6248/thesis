@@ -1,0 +1,4 @@
+[workspace]
+members = ["crates/lang",
+    "crates/main"
+    , "crates/music_primitives"]
