@@ -1,23 +1,13 @@
-use std::ops::{Add, Div, Mul, Sub};
+use enumkit::EnumValues;
+use music_primitives::{Duration, MusicNat, Pitch, TimeSignature};
+use num::rational::Ratio;
+use num::{Integer, ToPrimitive, Zero};
+use serde::ser::SerializeStruct;
+use serde::{Deserialize, Serialize, Serializer};
 use std::collections::HashMap;
 use std::fmt::Display;
+use std::ops::{Add, Div, Mul, Sub};
 use std::str::FromStr;
-use serde::{Deserialize, Serialize, Serializer};
-use enumkit::EnumValues;
-use num::{Integer, ToPrimitive, Zero};
-use num::rational::Ratio;
-use serde::ser::SerializeStruct;
-use music_primitives::{Duration, MusicNat, Pitch, TimeSignature};
-
-pub type Seconds = f32;
-
-pub type BPM = f32;
-
-pub type Measure = u32;
-
-
-pub type BeatUnit = u32;
-
 
 #[derive(Debug, Clone, Copy)]
 pub struct TimeCompression(pub Ratio<isize>);
@@ -58,8 +48,8 @@ impl Display for TimeCompression {
 
 #[cfg(test)]
 mod test {
-    use music_primitives::Beats;
     use super::*;
+    use music_primitives::Beats;
 
     #[test]
     fn test_music_time() {
@@ -452,9 +442,9 @@ impl FromStr for Instrument {
 }
 
 mod composition_element_tests {
-    use num::rational::Ratio;
+    use crate::composition::{Composition, Duration, Event, Instrument, Pitch, TimeCompression, Track, TrackId, Volume};
     use music_primitives::{Beats, TimeSignature};
-    use crate::composition::{Composition, Event, Instrument, Duration, Pitch, TimeCompression, Track, TrackId, Volume};
+    use num::rational::Ratio;
 
     fn assert_epsilon_close(a: f32, b: f32) {
         if (a - b).abs() < 0.01 {
