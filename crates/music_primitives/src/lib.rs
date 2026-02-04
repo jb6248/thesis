@@ -1,7 +1,9 @@
-use std::ops::{Add, Mul, Sub};
+use std::cmp::Ordering;
+use std::fmt::{Display, Formatter};
+use std::ops::{Add, AddAssign, Mul, Sub};
 use serde::{Deserialize, Serialize};
 use num::rational::Ratio;
-use num::ToPrimitive;
+use num::{ToPrimitive, Zero};
 use serde::ser::SerializeStruct;
 // Assuming a standard 12-tone equal temperament system
 
@@ -15,13 +17,85 @@ pub type RestValue = NoteValue;
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct NoteValue(pub Ratio<MusicNat>);
 
-pub type Beats = Duration;
+pub type Beats = Ratio<MusicNat>;
 
 
 /// The number of beats (duration) depends on the note value and the time signature.
-/// This is also used abstractly for representing offsets in time.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Serialize, Deserialize)]
-pub struct Duration(pub NoteValue, pub TimeSignature);
+/// This is also used for representing offsets in time.
+/// This is a durable type with robust mathematical properties.
+/// It will not be negative.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+pub struct Duration {
+    pub value: NoteValue,
+    pub time_signature: TimeSignature,
+}
+
+impl Display for Duration {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let measures = self.get_whole_measures();
+        let beats = self.get_rem_beats();
+        
+        if measures > 0 {
+            write!(f, "{}m", measures)?;
+            if beats > Beats::zero() {
+                write!(f, "+")?;
+            }
+        }
+        if beats > Beats::zero() {
+            if *beats.denom() == 1 {
+                write!(f, "{}", beats.numer())?;
+            } else {
+                write!(f, "{}/{}", beats.numer(), beats.denom())?;
+            }
+        }
+        Ok(())
+    }
+}
+
+// impl Duration {
+//     pub fn with(self, time_signature: TimeSignature) -> MusicTimeWithSignature {
+//         MusicTimeWithSignature {
+//             time_signature,
+//             time: self
+//         }
+//     }
+//
+//     pub fn from_seconds(time_signature: TimeSignature, bpm: BPM, seconds: Seconds) -> Self {
+//         let bps = bpm / 60.;
+//         let beats = bps * seconds;
+//         // instead of using Ratio::from_f32, I'll calculate the fraction myself
+//         let precision = 1000000.0; // to avoid floating point precision issues
+//         let numerator = (beats * precision).floor() as BeatUnit;
+//         let denominator = precision as BeatUnit;
+//         let beats = Beat(Ratio::new(numerator, denominator));
+//         beats.as_music_time(time_signature)
+//     }
+//
+//     pub fn from_whole_beats(time_signature: TimeSignature, beats: BeatUnit) -> Self {
+//         let measures = beats / time_signature.0;
+//         let beats = beats % time_signature.0;
+//         Duration(measures, Beat::whole(beats))
+//     }
+//
+//     pub fn to_seconds(&self, time_signature: TimeSignature, bpm: BPM) -> Seconds {
+//         let Duration(measures, beats) = *self;
+//         let total_beats = (measures * time_signature.0) as f32 + beats.as_float();
+//         total_beats * 60. / bpm
+//     }
+//
+//     pub fn zero() -> Self {
+//         Duration(0, Beat::zero())
+//     }
+//
+//     pub fn beats(beats: BeatUnit) -> Self {
+//         Duration(0, Beat::whole(beats))
+//     }
+//
+//     pub fn measures(measures: Measure) -> Self {
+//         Duration(measures, Beat::zero())
+//     }
+// }
+
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Ord, PartialOrd, Serialize, Deserialize)]
 pub struct TimeSignature(pub MusicNat, pub MusicNat);
 impl TimeSignature {
@@ -37,38 +111,73 @@ impl NoteValue {
         NoteValue(Ratio::new(numerator, denominator))
     }
     pub fn with(&self, time_signature: TimeSignature) -> Duration {
-        Duration(*self, time_signature)
+        Duration {
+            value: *self,
+            time_signature: time_signature
+        }
     }
 }
 impl Duration {
+    pub fn zero(time_signature: TimeSignature) -> Duration {
+        Duration {
+            value: NoteValue::new(0, 1),
+            time_signature: time_signature
+        }
+    }
+
+    pub fn from_beats_with_ts(beats: Ratio<MusicNat>, time_signature: TimeSignature) -> Duration {
+        // 1 beat in 3/4 is 1 quarter note (1/4)
+        // 3 beats in 3/8 is 3 eighth notes (3/8)
+        let note_value = NoteValue(Ratio::new(1, time_signature.1) * beats);
+        Duration {
+            value: note_value,
+            time_signature
+        }
+    }
+
+    pub fn measures_and_beats_with_ts(measures: Measures, beats: Ratio<MusicNat>, time_signature: TimeSignature) -> Duration {
+        let TimeSignature(num, _) = time_signature;
+        let total_beats = Ratio::from_integer(measures) * num + beats;
+        let note_value = NoteValue(total_beats / Ratio::from_integer(1));
+        Duration {
+            value: note_value,
+            time_signature
+        }
+    }
+    
+    pub fn measures_with_ts(measures: Measures, time_signature: TimeSignature) -> Duration {
+        Self::measures_and_beats_with_ts(measures, Ratio::from_integer(0), time_signature)
+    }
+
     /// Get the total number of beats in this duration
     pub fn get_beats(&self) -> Ratio<MusicNat> {
         // 4 on the bottom of the time signature represents quarter notes (NoteValue = 1/4)
         // it would be NoteValue / (1 / time_signature.1) = NoteValue * time_signature.1
-        let TimeSignature(_, denom) = self.1;
-        let Duration(note_value, _) = self;
+        let TimeSignature(_, denom) = self.time_signature;
+        let Duration { value: note_value, time_signature: _ } = self;
         note_value.0 * denom
     }
+
     /// Get the total number of measures in this duration (exact)
     pub fn get_measures(&self) -> Ratio<MusicNat> {
         // number of beats divided by number of beats per measure
-        let TimeSignature(num, _) = self.1;
+        let TimeSignature(num, _) = self.time_signature;
         self.get_beats() / num
     }
-    
+
     /// Get the whole number of measures in this duration
     pub fn get_whole_measures(&self) -> MusicNat {
         self.get_measures().to_integer()
     }
-    
+
     /// Get the remaining beats that do not make up a whole measure
     pub fn get_rem_beats(&self) -> Ratio<MusicNat> {
-        let TimeSignature(num, _) = self.1;
+        let TimeSignature(num, _) = self.time_signature;
         self.get_beats() % num
     }
-    
+
     /// Get the total number of seconds in this duration at the given BPM
-    pub fn get_seconds(&self, bpm: f32) -> f32 {
+    pub fn to_seconds(&self, bpm: f32) -> f32 {
         let beats = self.get_beats().to_f32().unwrap();
         // units: beats * (minutes / beats) * (seconds / minute) = seconds
         beats / bpm * 60.0
@@ -103,6 +212,18 @@ impl<'de> Deserialize<'de> for NoteValue {
     }
 }
 
+impl PartialOrd for Duration {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.value.cmp(&other.value))
+    }
+}
+
+impl Ord for Duration {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.value.cmp(&other.value)
+    }
+}
+
 impl Add<NoteValue> for NoteValue {
     type Output = NoteValue;
 
@@ -115,7 +236,44 @@ impl Add<NoteValue> for Duration {
     type Output = Duration;
 
     fn add(self, rhs: NoteValue) -> Self::Output {
-        Duration(self.0 + rhs, self.1)
+        Duration {
+            value: self.value + rhs,
+            time_signature: self.time_signature
+        }
+    }
+}
+
+impl Add<Duration> for Duration {
+    type Output = Duration;
+
+    fn add(self, rhs: Duration) -> Self::Output {
+        if self.time_signature != rhs.time_signature {
+            panic!("Cannot add Durations with different time signatures");
+        }
+        Duration {
+            value: self.value + rhs.value,
+            time_signature: self.time_signature
+        }
+    }
+}
+
+impl AddAssign<Duration> for Duration {
+    fn add_assign(&mut self, rhs: Duration) {
+        self.value = self.value + rhs.value;
+    }
+}
+
+impl Sub<Duration> for Duration {
+    type Output = Duration;
+
+    fn sub(self, rhs: Duration) -> Self::Output {
+        if self.time_signature != rhs.time_signature {
+            panic!("Cannot subtract Durations with different time signatures");
+        }
+        Duration {
+            value: self.value - rhs.value,
+            time_signature: self.time_signature
+        }
     }
 }
 
@@ -125,6 +283,33 @@ impl Mul<Ratio<MusicNat>> for NoteValue {
 
     fn mul(self, rhs: Ratio<MusicNat>) -> Self::Output {
         NoteValue(self.0 * rhs)
+    }
+}
+
+impl Mul<MusicNat> for NoteValue {
+    type Output = NoteValue;
+
+    fn mul(self, rhs: MusicNat) -> Self::Output {
+        self * Ratio::from_integer(rhs)
+    }
+}
+
+impl Mul<Ratio<MusicNat>> for Duration {
+    type Output = Duration;
+
+    fn mul(self, rhs: Ratio<MusicNat>) -> Self::Output {
+        Duration {
+            value: self.value * rhs,
+            time_signature: self.time_signature
+        }
+    }
+}
+
+impl Mul<MusicNat> for Duration {
+    type Output = Duration;
+
+    fn mul(self, rhs: MusicNat) -> Self::Output {
+        self * Ratio::from_integer(rhs)
     }
 }
 
@@ -267,6 +452,10 @@ impl Pitch {
     /// have to go through the IntoPitchClassNum trait to be properly converted.
     pub fn new<N: IntoPitchClassNum>(octave: Octave, note_num: N) -> Pitch {
         Pitch(octave, note_num.into().0)
+    }
+
+    pub fn none() -> Pitch {
+        Pitch(0, 0) // C0 by default
     }
 
     pub fn sharp(self) -> Pitch {

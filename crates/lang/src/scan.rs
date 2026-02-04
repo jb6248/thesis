@@ -25,7 +25,7 @@ Symbol :=
 NonTerminal := [-a-zA-Z1-9/#\?]
 
 Terminal :=
-  | Note (`<` Duration `>`)?
+  | Note (`<` NoteValue `>`)?
   | `:` MetaControl
 
 Note :=
@@ -104,7 +104,7 @@ pub struct TerminalScanner(pub ScanContext);
 
 pub struct NoteScanner;
 
-pub struct DurationScanner(pub ScanContext);
+pub struct NoteValueScanner(pub ScanContext);
 pub struct FractionScanner;
 
 pub struct MetaControlScanner;
@@ -353,10 +353,13 @@ impl Scanner for TerminalScanner {
             ScanPrefix::from(":".to_string()),
             scan_map_input(scan_map(MetaControlScanner, |s| Terminal::Meta(s)), |s| &s[1..]),
             None,
-            scan_map(concat(NoteScanner, DurationScanner(self.0)), |(note, note_value)| {
+            scan_map(concat(NoteScanner, NoteValueScanner(self.0)), |(note, note_value)| {
                 Terminal::Music {
                     note,
-                    duration: Duration(note_value, self.0.time_signature),
+                    duration: Duration {
+                        value: note_value,
+                        time_signature: self.0.time_signature
+                    },
                 }
             }),
         )
@@ -429,7 +432,7 @@ impl Scanner for NoteScanner {
     }
 }
 
-impl Scanner for DurationScanner {
+impl Scanner for NoteValueScanner {
     type Output = NoteValue;
 
     fn scan<'a>(&self, input: &'a str) -> Result<(Self::Output, &'a str)> {
@@ -871,7 +874,7 @@ mod test {
     #[test]
     fn test_duration() {
         let input = "<1/4>";
-        let scanner = ConsumeScanner(DurationScanner(ScanContext::default()));
+        let scanner = ConsumeScanner(NoteValueScanner(ScanContext::default()));
         let result = scanner.scan(input);
         println!("result: {result:#?}");
         assert!(result.is_ok());

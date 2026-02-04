@@ -1,17 +1,15 @@
-
-
-use crate::scan::Scanner;
-use crate::scan::{consume, GrammarScanner, MusicStringScanner, ScanError};
-use crate::cfg::{TimeCompression};
+use crate::cfg::TimeCompression;
 use crate::composition::*;
+use crate::scan::Scanner;
+use crate::scan::{consume, GrammarScanner, ScanError};
+use music_primitives::{Duration, Pitch, TimeSignature};
 use num::Zero;
-use rand::{Rng};
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::cmp::PartialEq;
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::str::FromStr;
-use music_primitives::{Duration, Pitch, TimeSignature};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Grammar {
@@ -32,6 +30,7 @@ pub enum MusicPrimitive {
     Split {
         branches: Vec<MusicString>
     },
+    /// Use MusicTransform::Repeat instead
     #[deprecated]
     Repeat {
         num: usize,
@@ -165,7 +164,7 @@ impl MusicString {
         }
 
         fn add_rest_event(tracks: &mut HashMap<Instrument, Track>, e: Event, instrument: Instrument) {
-            if let Some(mut track) = tracks.get_mut(&instrument) {
+            if let Some(track) = tracks.get_mut(&instrument) {
                 track.rests.push(e);
             } else {
                 tracks.insert(
@@ -191,13 +190,13 @@ impl MusicString {
                 add_track(tracks, track);
             }
         }
-        let mut current_mt = MusicTime::zero();
+        let mut current_mt = Duration::zero(time_signature);
         let mut current_instrument = starting_instrument.unwrap_or(Instrument::SineWave);
         let mut current_volume = Volume(50);
         for mp in self.0.iter() {
             let duration = match mp {
                 MusicPrimitive::Simple(sym) => match sym {
-                    Symbol::NT(_) => MusicTime::zero(),
+                    Symbol::NT(_) => Duration::zero(time_signature),
                     Symbol::T(Terminal::Music { note, duration }) => match note {
                         TerminalNote::Note { pitch } => {
                             add_event(
@@ -219,7 +218,7 @@ impl MusicString {
                                     start: current_mt,
                                     duration: *duration,
                                     volume: Volume(0),
-                                    pitch: Pitch(0, 0),
+                                    pitch: Pitch::none(), // don't care
                                 },
                                 current_instrument,
                             );
@@ -235,7 +234,7 @@ impl MusicString {
                                 current_volume = *v;
                             }
                         }
-                        MusicTime::zero()
+                        Duration::zero(time_signature)
                     }
                 },
                 MusicPrimitive::Split { branches } => {
@@ -258,7 +257,7 @@ impl MusicString {
                             }
                         }
                         // there are none, so yes they are
-                        None => Some(MusicTime::zero()),
+                        None => Some(Duration::zero(time_signature)),
                     };
                     if let Some(dur) = uniform_duration {
                         for (_d, comp) in comps {
@@ -272,24 +271,6 @@ impl MusicString {
                             )));
                     }
                 }
-                MusicPrimitive::Repeat { content, num } => {
-                    let composed = content.compose(time_signature, Some(current_instrument))?;
-                    let duration = composed.get_duration();
-                    let mut offset = current_mt;
-                    for _i in 0..*num {
-                        let mut comp_i = composed.clone();
-                        comp_i.shift_by(offset);
-                        add_composition(&mut tracks, comp_i);
-                        offset = offset.with(time_signature) + duration;
-                    }
-                    let mut total_duration = MusicTime::zero();
-                    for _i in 0..*num {
-                        total_duration = total_duration.with(time_signature) + duration;
-                    }
-                    // println!("total duration for {num} repeats is {total_duration:?}, or {:?} * {num}",
-                    //          composed.get_duration());
-                    total_duration
-                },
                 MusicPrimitive::Transform { transform, content } => {
                     match transform {
                         MusicTransform::Transpose { semitones} => {
@@ -308,11 +289,11 @@ impl MusicString {
                                 let mut comp_i = composed.clone();
                                 comp_i.shift_by(offset);
                                 add_composition(&mut tracks, comp_i);
-                                offset = offset.with(time_signature) + duration;
+                                offset = offset + duration;
                             }
-                            let mut total_duration = MusicTime::zero();
+                            let mut total_duration = Duration::zero(time_signature);
                             for _i in 0..*num {
-                                total_duration = total_duration.with(time_signature) + duration;
+                                total_duration = total_duration + duration;
                             }
                             // println!("total duration for {num} repeats is {total_duration:?}, or {:?} * {num}",
                             //          composed.get_duration());
@@ -328,8 +309,11 @@ impl MusicString {
                         }
                     }
                 }
+                _ => {
+                    panic!("Repeat is deprecated, use Transform instead");
+                }
             };
-            current_mt = current_mt.with(time_signature) + duration;
+            current_mt += duration;
         }
         Ok(Composition {
             tracks: tracks.into_values().collect(),
@@ -460,40 +444,12 @@ impl ToString for Terminal {
     }
 }
 
-impl ToString for MusicTime {
-    fn to_string(&self) -> String {
-        let MusicTime(measures, beats) = self;
-        let beat_str = if *beats == Beat::zero() {
-            "0".to_string()
-        } else {
-            if beats.denominator() == 1 {
-                format!("{}", beats.numerator())
-            } else {
-                format!("{}/{}", beats.numerator(), beats.denominator())
-            }
-        };
-        if *measures == 0 {
-            format!("{}", beat_str)
-        } else {
-            format!("{}m+{}", measures, beat_str)
-        }
-    }
-}
-
 impl ToString for MetaControl {
     fn to_string(&self) -> String {
         match self {
             MetaControl::ChangeInstrument(i) => format!("::i={:?}", i),
             MetaControl::ChangeVolume(v) => format!("::v={:?}", v),
         }
-    }
-}
-impl FromStr for MusicString {
-    type Err = ScanError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let scanner = consume(MusicStringScanner);
-        scanner.scan(s).map(|(r, _s)| r)
     }
 }
 
