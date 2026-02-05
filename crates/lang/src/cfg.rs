@@ -508,8 +508,9 @@ impl MusicString {
                         MusicTransform::Transpose { semitones } => {
                             inner.transpose(*semitones);
                             let duration = inner.get_duration();
-                            for track in inner.tracks {
+                            for mut track in inner.tracks {
                                 let track_id = get_next_track_id(&tracks);
+                                track.identifier = TrackId::Custom(track_id);
                                 tracks.insert(track_id, track);
                             }
                             duration
@@ -517,8 +518,9 @@ impl MusicString {
                         MusicTransform::Compression { factor } => {
                             inner.compress(*factor);
                             let duration = inner.get_duration();
-                            for track in inner.tracks {
+                            for mut track in inner.tracks {
                                 let track_id = get_next_track_id(&tracks);
+                                track.identifier = TrackId::Custom(track_id);
                                 tracks.insert(track_id, track);
                             }
                             duration
@@ -526,13 +528,14 @@ impl MusicString {
                         MusicTransform::Repeat { num } => {
                             let single_duration = inner.get_duration();
                             let mut total_duration = Duration::zero(time_signature);
-                            for i in 0..*num {
+                            for _ in 0..*num {
                                 let mut repeat_inner = inner.clone();
                                 repeat_inner.shift_by(offset + total_duration);
                                 // this could be cleaned up by merging the same tracks from
                                 // repeat compositions
-                                for track in repeat_inner.tracks {
+                                for mut track in repeat_inner.tracks {
                                     let track_id = get_next_track_id(&tracks);
+                                    track.identifier = TrackId::Custom(track_id);
                                     tracks.insert(track_id, track);
                                 }
                                 total_duration = total_duration + single_duration;
@@ -541,15 +544,18 @@ impl MusicString {
                         }
                     }
                 }
-                _ => {
-                    panic!("Repeat is deprecated, use Transform instead");
+                mp => {
+                    panic!("Compose_v2 does not support the primitive {:?}", mp);
                 }
             };
             offset += duration;
         }
-        Err(ComposeError::MismatchedLengths(
-            "Not implemented yet".to_string(),
-        ))
+        Ok(Composition {
+            tracks: tracks.into_iter()
+                .map(|(_id, track)| track)
+                .collect(),
+            time_signature,
+        })
     }
 
     /// Rewrites the music string according to the grammar, replacing non-terminals with their productions.

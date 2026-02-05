@@ -177,8 +177,6 @@ impl Track {
         let mut s = String::new();
         s.push('[');
         let bpm = 1.;
-        let start_time = start.to_seconds(bpm);
-        let end_time = end.to_seconds(bpm);
         let total_beats = self.get_duration(time_signature).get_beats();
         for i in 0..columns {
             let time = total_beats / (columns as MusicNat) * (i as MusicNat);
@@ -214,6 +212,8 @@ impl Track {
             .map(|e| *e)
             .collect()
     }
+
+    /// Get start of track (including rests)
     pub fn get_start(&self) -> Option<Duration> {
         min_option(self.events.iter()
                        .map(|e| e.start)
@@ -221,12 +221,36 @@ impl Track {
                        .map(|e| e.start)
                        .min())
     }
+
+    /// Get end of track (including rests)
     pub fn get_end(&self, time_signature: TimeSignature) -> Option<Duration> {
         max_option(self.events.iter()
                        .map(|e| e.get_end(time_signature))
                        .max(), self.rests.iter()
                        .map(|e| e.get_end(time_signature))
                        .max())
+    }
+
+    /// Validate the track by making sure that there are no overlaps or gaps between
+    /// the start and the end. If there are gaps, they should be filled with rests, but
+    /// this method does not do that.
+    pub fn validate_contiguous(&self) -> bool {
+        let mut all_events = self.events.clone();
+        all_events.sort_by(|a, b| a.start.cmp(&b.start));
+        if all_events.is_empty() {
+            return true;
+        }
+        let mut current_time = all_events[0].start;
+        for event in all_events {
+            if event.start > current_time {
+                return false; // gap
+            }
+            if event.start < current_time {
+                return false; // overlap
+            }
+            current_time = event.get_end(current_time.time_signature);
+        }
+        true
     }
 
     pub fn get_duration(&self, time_signature: TimeSignature) -> Duration {
@@ -443,10 +467,12 @@ impl FromStr for Instrument {
     }
 }
 
+#[cfg(test)]
 mod composition_element_tests {
     use crate::composition::{Composition, Duration, Event, Instrument, Pitch, TimeCompression, Track, TrackId, Volume};
     use music_primitives::{Beats, TimeSignature};
     use num::rational::Ratio;
+    use crate::cfg::{MusicPrimitive, MusicString, Performer, Symbol, Terminal};
 
     fn assert_epsilon_close(a: f32, b: f32) {
         if (a - b).abs() < 0.01 {
@@ -630,6 +656,83 @@ mod composition_element_tests {
         ]);
         composition1.compress(compression);
         assert_eq!(composition1, composition_half);
+    }
+
+    #[test]
+    fn test_compose_v2_1() {
+        let ts = TimeSignature::common();
+        let music_string = MusicString(vec![
+            MusicPrimitive::Simple(Symbol::T(Terminal::CurrentSound {duration: Duration::from_beats_with_ts(Beats::from_integer(2), ts)}),)
+        ]);
+        let composition = music_string.compose_v2(ts, Performer {
+            instrument: Instrument::Piano,
+            volume: Volume(80),
+            pitch: Pitch::middle_c()
+        }).unwrap();
+        assert_eq!(composition.tracks.len(), 1);
+        let track = &composition.tracks[0];
+        assert_eq!(track.instrument, Instrument::Piano);
+        assert_eq!(track.events.len(), 1);
+        let event = &track.events[0];
+        assert_eq!(event.duration, Duration::from_beats_with_ts(Beats::from_integer(2), ts));
+
+        assert_eq!(composition.get_start(), Some(Duration::from_beats_with_ts(Beats::from_integer(0), ts)));
+        assert_eq!(composition.get_end(), Some(Duration::from_beats_with_ts(Beats::from_integer(2), ts)));
+    }
+
+    #[test]
+    fn test_compose_v2_2() {
+        // check that different length branches in a split cause an error
+        let ts = TimeSignature::common();
+        let music_string = MusicString(vec![
+            MusicPrimitive::Split {
+                branches: vec![
+                    MusicString(vec![
+                        MusicPrimitive::Simple(Symbol::T(Terminal::CurrentSound {duration: Duration::from_beats_with_ts(Beats::from_integer(2), ts)}),)
+                    ]),
+                    MusicString(vec![
+                        MusicPrimitive::Simple(Symbol::T(Terminal::CurrentSound {duration: Duration::from_beats_with_ts(Beats::from_integer(3), ts)}),)
+                    ]),
+                ]
+            },
+        ]);
+        let composition = music_string.compose_v2(ts, Performer {
+            instrument: Instrument::Piano,
+            volume: Volume(80),
+            pitch: Pitch::middle_c()
+        });
+        assert!(composition.is_err());
+    }
+
+    #[test]
+    fn test_compose_v2_3() {
+        let ts = TimeSignature::common();
+        let music_string = MusicString(vec![
+            MusicPrimitive::Split {
+                branches: vec![
+                    MusicString(vec![
+                        MusicPrimitive::Simple(Symbol::T(Terminal::CurrentSound {duration: Duration::from_beats_with_ts(Beats::from_integer(2), ts)}),)
+                    ]),
+                    MusicString(vec![
+                        MusicPrimitive::Simple(Symbol::T(Terminal::CurrentSound {duration: Duration::from_beats_with_ts(Beats::from_integer(2), ts)}),)
+                    ]),
+                ]
+            },
+        ]);
+        let composition = music_string.compose_v2(ts, Performer {
+            instrument: Instrument::Piano,
+            volume: Volume(80),
+            pitch: Pitch::middle_c()
+        }).unwrap();
+
+        assert_eq!(composition.tracks.len(), 2);
+        for track in &composition.tracks {
+            assert_eq!(track.instrument, Instrument::Piano);
+            assert_eq!(track.events.len(), 1);
+            let event = &track.events[0];
+            assert_eq!(event.duration, Duration::from_beats_with_ts(Beats::from_integer(2), ts));
+            assert_eq!(event.start, Duration::from_beats_with_ts(Beats::from_integer(0), ts));
+        }
     }
 }
 
