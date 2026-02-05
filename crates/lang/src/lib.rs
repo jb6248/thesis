@@ -1,6 +1,7 @@
 pub mod scan;
 pub mod cfg;
 pub mod composition;
+mod lilypond;
 
 pub fn add(left: u64, right: u64) -> u64 {
     left + right

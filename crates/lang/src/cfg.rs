@@ -1,14 +1,14 @@
 use crate::cfg::TimeCompression;
 use crate::composition::*;
 use crate::scan::Scanner;
-use crate::scan::{consume, GrammarScanner, ScanError};
+use crate::scan::{GrammarScanner, ScanError, consume};
 use music_primitives::{Duration, Pitch, TimeSignature};
 use num::Zero;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::cmp::PartialEq;
 use std::collections::HashMap;
-use std::fmt::Display;
+use std::fmt::{Display, Formatter};
 use std::str::FromStr;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -28,7 +28,7 @@ pub struct MusicString(pub Vec<MusicPrimitive>);
 pub enum MusicPrimitive {
     Simple(Symbol),
     Split {
-        branches: Vec<MusicString>
+        branches: Vec<MusicString>,
     },
     /// Use MusicTransform::Repeat instead
     #[deprecated]
@@ -38,22 +38,16 @@ pub enum MusicPrimitive {
     },
     Transform {
         transform: MusicTransform,
-        content: MusicString
-    }
+        content: MusicString,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum MusicTransform {
-    Transpose {
-        semitones: i8,
-    },
-    Repeat {
-        num: usize,
-    },
-    Compression {
-        factor: TimeCompression,
-    }
+    Transpose { semitones: i8 },
+    Repeat { num: usize },
+    Compression { factor: TimeCompression },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -71,9 +65,18 @@ pub enum NonTerminal {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum Terminal {
-    Music {
+    /// Play this specific note.
+    AbsoluteSound {
         duration: Duration,
         note: TerminalNote,
+    },
+    /// Play a sound for this length with whatever settings
+    /// the performer currently has.
+    CurrentSound {
+        duration: Duration,
+    },
+    MovePitch {
+        semitones: i8,
     },
     Meta(MetaControl),
 }
@@ -81,9 +84,7 @@ pub enum Terminal {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum TerminalNote {
-    Note {
-        pitch: Pitch
-    },
+    Note { pitch: Pitch },
     Rest,
 }
 
@@ -103,10 +104,7 @@ impl Grammar {
         self.productions.iter().find(|p| &p.0 == nt)
     }
 
-    pub fn get_production_random(
-        &self,
-        nt: &NonTerminal,
-    ) -> Option<&Production> {
+    pub fn get_production_random(&self, nt: &NonTerminal) -> Option<&Production> {
         let mut rng = rand::thread_rng();
         let productions: Vec<_> = self.productions.iter().filter(|p| &p.0 == nt).collect();
         if productions.is_empty() {
@@ -130,7 +128,6 @@ impl FromStr for Grammar {
 #[derive(Debug)]
 pub enum ComposeError {
     MismatchedLengths(String),
-
 }
 
 impl Display for MusicTransform {
@@ -144,8 +141,31 @@ impl Display for MusicTransform {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Performer {
+    pub instrument: Instrument,
+    pub volume: Volume,
+    pub pitch: Pitch,
+}
+
+impl Default for Performer {
+    fn default() -> Self {
+        Performer {
+            instrument: Instrument::Piano,
+            volume: Volume(MAX_VOLUME / 2),
+            pitch: Pitch::middle_c(),
+        }
+    }
+}
+
 impl MusicString {
-    pub fn compose(&self, time_signature: TimeSignature, starting_instrument: Option<Instrument>) -> Result<Composition, ComposeError> {
+    /// This one composes each instrument onto a separate track.
+    /// One track may have multiple concurrent lines. This only considers terminals that are absolute notes.
+    pub fn compose_v1(
+        &self,
+        time_signature: TimeSignature,
+        starting_instrument: Option<Instrument>,
+    ) -> Result<Composition, ComposeError> {
         let mut tracks = HashMap::new();
         fn add_event(tracks: &mut HashMap<Instrument, Track>, e: Event, instrument: Instrument) {
             if let Some(mut track) = tracks.get_mut(&instrument) {
@@ -163,7 +183,11 @@ impl MusicString {
             }
         }
 
-        fn add_rest_event(tracks: &mut HashMap<Instrument, Track>, e: Event, instrument: Instrument) {
+        fn add_rest_event(
+            tracks: &mut HashMap<Instrument, Track>,
+            e: Event,
+            instrument: Instrument,
+        ) {
             if let Some(track) = tracks.get_mut(&instrument) {
                 track.rests.push(e);
             } else {
@@ -197,7 +221,7 @@ impl MusicString {
             let duration = match mp {
                 MusicPrimitive::Simple(sym) => match sym {
                     Symbol::NT(_) => Duration::zero(time_signature),
-                    Symbol::T(Terminal::Music { note, duration }) => match note {
+                    Symbol::T(Terminal::AbsoluteSound { note, duration }) => match note {
                         TerminalNote::Note { pitch } => {
                             add_event(
                                 &mut tracks,
@@ -236,11 +260,17 @@ impl MusicString {
                         }
                         Duration::zero(time_signature)
                     }
+                    Symbol::T(term) => {
+                        panic!(
+                            "The terminal {:?} is not implemented for this composer",
+                            term
+                        );
+                    }
                 },
                 MusicPrimitive::Split { branches } => {
                     let comps: Vec<_> = branches
                         .into_iter()
-                        .map(|ms| ms.compose(time_signature, Some(current_instrument)))
+                        .map(|ms| ms.compose_v1(time_signature, Some(current_instrument)))
                         .err_first()?
                         .map(|mut c| {
                             c.shift_by(current_mt);
@@ -265,16 +295,17 @@ impl MusicString {
                         }
                         dur
                     } else {
-                        return Err(ComposeError::MismatchedLengths(
-                            format!("Not all split tracks have the same duration: {:?}",
-                                    comps.iter().map(|(d, c)| d).collect::<Vec<_>>()
-                            )));
+                        return Err(ComposeError::MismatchedLengths(format!(
+                            "Not all split tracks have the same duration: {:?}",
+                            comps.iter().map(|(d, c)| d).collect::<Vec<_>>()
+                        )));
                     }
                 }
                 MusicPrimitive::Transform { transform, content } => {
                     match transform {
-                        MusicTransform::Transpose { semitones} => {
-                            let mut composed = content.compose(time_signature, Some(current_instrument))?;
+                        MusicTransform::Transpose { semitones } => {
+                            let mut composed =
+                                content.compose_v1(time_signature, Some(current_instrument))?;
                             composed.transpose(*semitones);
                             composed.shift_by(current_mt);
                             let duration = composed.get_duration();
@@ -282,7 +313,8 @@ impl MusicString {
                             duration
                         }
                         MusicTransform::Repeat { num } => {
-                            let composed = content.compose(time_signature, Some(current_instrument))?;
+                            let composed =
+                                content.compose_v1(time_signature, Some(current_instrument))?;
                             let duration = composed.get_duration();
                             let mut offset = current_mt;
                             for _i in 0..*num {
@@ -300,7 +332,8 @@ impl MusicString {
                             total_duration
                         }
                         MusicTransform::Compression { factor } => {
-                            let mut composed = content.compose(time_signature, Some(current_instrument))?;
+                            let mut composed =
+                                content.compose_v1(time_signature, Some(current_instrument))?;
                             composed.compress(*factor);
                             composed.shift_by(current_mt);
                             let duration = composed.get_duration();
@@ -309,8 +342,11 @@ impl MusicString {
                         }
                     }
                 }
-                _ => {
-                    panic!("Repeat is deprecated, use Transform instead");
+                mp => {
+                    panic!(
+                        "The primitive {:?} is not implemented for this composer",
+                        mp
+                    );
                 }
             };
             current_mt += duration;
@@ -321,43 +357,254 @@ impl MusicString {
         })
     }
 
+    /// This one should make each new line a new voice. It's important to note that
+    /// multiple voices are started with SPLITS. A voice has only 1 instrument and 1 note,
+    /// and each event should be a partition of time between start and end (no overlaps and no gaps).
+    pub fn compose_v2(
+        &self,
+        time_signature: TimeSignature,
+        starting_performer: Performer,
+    ) -> Result<Composition, ComposeError> {
+        // output components
+        let mut tracks: HashMap<usize, Track> = HashMap::new();
+        fn get_next_track_id(tracks: &HashMap<usize, Track>) -> usize {
+            // max id in tracks + 1
+            tracks.iter().map(|(k, _track)| *k).max().unwrap_or(0) + 1
+        }
+
+        fn add_event(
+            tracks: &mut HashMap<usize, Track>,
+            track_id: usize,
+            e: Event,
+            performer: &Performer,
+            is_rest: bool,
+        ) {
+            if let Some(track) = tracks.get_mut(&track_id) {
+                if is_rest {
+                    track.rests.push(e);
+                } else {
+                    track.events.push(e);
+                }
+            } else {
+                let mut new_track = Track {
+                    identifier: TrackId::Instrument(performer.instrument),
+                    instrument: performer.instrument,
+                    events: vec![],
+                    rests: vec![],
+                };
+                if is_rest {
+                    new_track.rests.push(e);
+                } else {
+                    new_track.events.push(e);
+                }
+                tracks.insert(track_id, new_track);
+            }
+        }
+
+        // current state
+        let mut current_track_id: usize = 0;
+        let mut offset = Duration::zero(time_signature);
+        let mut performer = starting_performer.clone();
+        for m_prim in self.0.iter() {
+            // Handle each primitive by adding to the tracks as needed
+            // return the duration that this primitive takes.
+            let duration = match m_prim {
+                MusicPrimitive::Simple(symbol) => {
+                    match symbol {
+                        Symbol::NT(_) => Duration::zero(time_signature),
+                        Symbol::T(Terminal::Meta(meta_control)) => {
+                            // Update the current performer based on the meta control
+                            match meta_control {
+                                MetaControl::ChangeInstrument(instr) => {
+                                    current_track_id = get_next_track_id(&tracks);
+                                    performer.instrument = *instr;
+                                }
+                                MetaControl::ChangeVolume(v) => {
+                                    performer.volume = *v;
+                                }
+                            }
+                            Duration::zero(time_signature)
+                        }
+                        Symbol::T(Terminal::AbsoluteSound { duration, note }) => {
+                            add_event(
+                                &mut tracks,
+                                current_track_id,
+                                Event {
+                                    start: offset,
+                                    duration: *duration,
+                                    volume: performer.volume,
+                                    pitch: match note {
+                                        TerminalNote::Note { pitch } => *pitch,
+                                        TerminalNote::Rest => Pitch::none(),
+                                    },
+                                },
+                                &performer,
+                                matches!(note, TerminalNote::Rest),
+                            );
+                            *duration
+                        }
+                        Symbol::T(Terminal::CurrentSound { duration }) => {
+                            add_event(
+                                &mut tracks,
+                                current_track_id,
+                                Event {
+                                    start: offset,
+                                    duration: *duration,
+                                    volume: performer.volume,
+                                    pitch: performer.pitch,
+                                },
+                                &performer,
+                                false,
+                            );
+                            *duration
+                        }
+                        Symbol::T(Terminal::MovePitch { semitones }) => {
+                            performer.pitch.transpose(*semitones);
+                            Duration::zero(time_signature)
+                        }
+                    }
+                }
+                MusicPrimitive::Split { branches } => {
+                    // compose each branch and ensure that they are the same length
+                    let comps: Vec<_> = branches
+                        .into_iter()
+                        .map(|ms| ms.compose_v2(time_signature, performer.clone()))
+                        .err_first()?
+                        .map(|mut c| {
+                            c.shift_by(offset);
+                            c
+                        })
+                        .map(|c| (c.get_duration(), c))
+                        .collect();
+                    if comps.is_empty() {
+                        Duration::zero(time_signature)
+                    } else {
+                        // guaranteed to not be empty
+                        let (dur, has_uniform_duration) = comps
+                            .iter()
+                            .map(|(d, _c)| (*d, true))
+                            .reduce(|(d1, ok1), (d2, ok2)| (d1, ok1 && ok2 && d1 == d2))
+                            .unwrap();
+                        if !has_uniform_duration {
+                            return Err(ComposeError::MismatchedLengths(format!(
+                                "Not all split tracks have the same duration: {:?}",
+                                comps.iter().map(|(d, c)| d).collect::<Vec<_>>()
+                            )));
+                        }
+                        // otherwise, add each track to the tracks
+                        for (_d, comp) in comps {
+                            for track in comp.tracks {
+                                let track_id = get_next_track_id(&tracks);
+                                tracks.insert(track_id, track);
+                            }
+                        }
+                        dur
+                    }
+                }
+                MusicPrimitive::Transform { transform, content } => {
+                    let mut inner = content.compose_v2(time_signature, performer.clone())?;
+                    inner.shift_by(offset);
+                    match transform {
+                        MusicTransform::Transpose { semitones } => {
+                            inner.transpose(*semitones);
+                            let duration = inner.get_duration();
+                            for track in inner.tracks {
+                                let track_id = get_next_track_id(&tracks);
+                                tracks.insert(track_id, track);
+                            }
+                            duration
+                        }
+                        MusicTransform::Compression { factor } => {
+                            inner.compress(*factor);
+                            let duration = inner.get_duration();
+                            for track in inner.tracks {
+                                let track_id = get_next_track_id(&tracks);
+                                tracks.insert(track_id, track);
+                            }
+                            duration
+                        }
+                        MusicTransform::Repeat { num } => {
+                            let single_duration = inner.get_duration();
+                            let mut total_duration = Duration::zero(time_signature);
+                            for i in 0..*num {
+                                let mut repeat_inner = inner.clone();
+                                repeat_inner.shift_by(offset + total_duration);
+                                // this could be cleaned up by merging the same tracks from
+                                // repeat compositions
+                                for track in repeat_inner.tracks {
+                                    let track_id = get_next_track_id(&tracks);
+                                    tracks.insert(track_id, track);
+                                }
+                                total_duration = total_duration + single_duration;
+                            }
+                            total_duration
+                        }
+                    }
+                }
+                _ => {
+                    panic!("Repeat is deprecated, use Transform instead");
+                }
+            };
+            offset += duration;
+        }
+        Err(ComposeError::MismatchedLengths(
+            "Not implemented yet".to_string(),
+        ))
+    }
+
     /// Rewrites the music string according to the grammar, replacing non-terminals with their productions.
     /// If `random` is true, it will choose a random production for each non-terminal.
     /// If `panic_on_bad_production` is true, it will panic if a non-terminal has no production.
-    pub fn parallel_rewrite(&self, grammar: &Grammar, random: bool, panic_on_bad_production: bool) -> Self {
+    pub fn parallel_rewrite(
+        &self,
+        grammar: &Grammar,
+        random: bool,
+        panic_on_bad_production: bool,
+    ) -> Self {
         let mut new_string = vec![];
         for (i, mp) in self.0.iter().enumerate() {
             match mp {
                 MusicPrimitive::Simple(x) => match x {
                     Symbol::NT(nt) => {
-                        if let Some(Production(nt, ms)) = if random { grammar.get_production_random(nt) } else { grammar.get_production(nt) } {
+                        if let Some(Production(nt, ms)) = if random {
+                            grammar.get_production_random(nt)
+                        } else {
+                            grammar.get_production(nt)
+                        } {
                             new_string.extend(ms.clone().0);
                         } else {
                             if panic_on_bad_production {
-                                panic!("No production found for non-terminal {:?} at index {}", nt, i);
+                                panic!(
+                                    "No production found for non-terminal {:?} at index {}",
+                                    nt, i
+                                );
                             }
                         }
                     }
                     x => {
                         new_string.push(MusicPrimitive::Simple(x.clone()));
                     }
-                }
+                },
                 MusicPrimitive::Split { branches } => {
                     let new_branches = branches
                         .iter()
                         .map(|ms| ms.parallel_rewrite(grammar, random, panic_on_bad_production))
                         .collect::<Vec<_>>();
-                    new_string.push(MusicPrimitive::Split { branches: new_branches });
+                    new_string.push(MusicPrimitive::Split {
+                        branches: new_branches,
+                    });
                 }
                 MusicPrimitive::Repeat { num, content } => {
-                    let new_content = content.parallel_rewrite(grammar, random, panic_on_bad_production);
+                    let new_content =
+                        content.parallel_rewrite(grammar, random, panic_on_bad_production);
                     new_string.push(MusicPrimitive::Repeat {
                         num: *num,
                         content: new_content,
                     });
                 }
                 MusicPrimitive::Transform { transform, content } => {
-                    let new_content = content.parallel_rewrite(grammar, random, panic_on_bad_production);
+                    let new_content =
+                        content.parallel_rewrite(grammar, random, panic_on_bad_production);
                     new_string.push(MusicPrimitive::Transform {
                         transform: transform.clone(),
                         content: new_content,
@@ -368,7 +615,13 @@ impl MusicString {
         MusicString(new_string)
     }
 
-    pub fn parallel_rewrite_n(&self, grammar: &Grammar, random: bool, panic_on_bad_production: bool, n: usize) -> Self {
+    pub fn parallel_rewrite_n(
+        &self,
+        grammar: &Grammar,
+        random: bool,
+        panic_on_bad_production: bool,
+        n: usize,
+    ) -> Self {
         let mut new_string = self.clone();
         for _i in 0..n {
             new_string = new_string.parallel_rewrite(grammar, random, panic_on_bad_production);
@@ -388,14 +641,17 @@ impl ToString for MusicString {
                 }
                 MusicPrimitive::Split { branches } => {
                     s.push_str("{");
-                    let str = branches.into_iter()
+                    let str = branches
+                        .into_iter()
                         .map(|b| b.to_string())
                         .reduce(|b1, b2| b1 + " | " + &b2)
                         .unwrap_or("".to_string());
                     s.push_str(&str);
                     s.push('}');
                 }
-                MusicPrimitive::Repeat { num, content } => panic!("Repeat is deprecated, use Transform instead"),
+                MusicPrimitive::Repeat { num, content } => {
+                    panic!("Repeat is deprecated, use Transform instead")
+                }
                 MusicPrimitive::Transform { transform, content } => {
                     s.push_str(&format!("[{}][", transform));
                     s.push_str(&content.to_string());
@@ -425,21 +681,37 @@ impl ToString for NonTerminal {
     }
 }
 
-impl ToString for Terminal {
-    fn to_string(&self) -> String {
+impl Display for Terminal {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Terminal::Music { duration, note } => {
-                match note {
-                    TerminalNote::Note { pitch } => {
-                        let letter = pitch.letter_name();
-                        format!(":{letter}<{}>", duration.to_string())
-                    }
-                    TerminalNote::Rest => {
-                        format!(":_<{}>", duration.to_string())
-                    }
+            Terminal::AbsoluteSound { duration, note } => match note {
+                TerminalNote::Note { pitch } => {
+                    let letter = pitch.letter_name();
+                    write!(f, ":{letter}<{}>", duration.to_string())
                 }
+                TerminalNote::Rest => {
+                    write!(f, ":_<{}>", duration.to_string())
+                }
+            },
+            Terminal::Meta(control) => write!(f, "{}", control.to_string()),
+            Terminal::CurrentSound { duration } => {
+                // todo: make these more realistic?
+                // ♪ is an eighth note, ♩ is a quarter note
+                write!(f, "♩<{}>", duration.to_string())
             }
-            Terminal::Meta(control) => control.to_string(),
+            Terminal::MovePitch { semitones } => {
+                write!(
+                    f,
+                    "{}{}",
+                    if *semitones > 0 {
+                        // up arrow
+                        "↑"
+                    } else {
+                        "↓"
+                    },
+                    semitones
+                )
+            }
         }
     }
 }
@@ -454,27 +726,24 @@ impl ToString for MetaControl {
 }
 
 pub trait ReduceResultIter<I, E> {
-    fn err_first(self) -> Result<impl Iterator<Item=I>, E>;
+    fn err_first(self) -> Result<impl Iterator<Item = I>, E>;
 }
 
 impl<I, E, T> ReduceResultIter<I, E> for T
 where
-    T: Iterator<Item=Result<I, E>>,
+    T: Iterator<Item = Result<I, E>>,
 {
-    fn err_first(self) -> Result<impl Iterator<Item=I>, E> {
+    fn err_first(self) -> Result<impl Iterator<Item = I>, E> {
         let mut processed = vec![];
         for e in self {
             match e {
                 Ok(i) => processed.push(i),
-                Err(e) => return Err(e)
+                Err(e) => return Err(e),
             }
         }
         Ok(processed.into_iter())
     }
 }
 
-
 #[cfg(test)]
-mod test {
-    
-}
+mod test {}

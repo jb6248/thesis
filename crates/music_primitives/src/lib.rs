@@ -34,7 +34,7 @@ impl Display for Duration {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let measures = self.get_whole_measures();
         let beats = self.get_rem_beats();
-        
+
         if measures > 0 {
             write!(f, "{}m", measures)?;
             if beats > Beats::zero() {
@@ -144,7 +144,7 @@ impl Duration {
             time_signature
         }
     }
-    
+
     pub fn measures_with_ts(measures: Measures, time_signature: TimeSignature) -> Duration {
         Self::measures_and_beats_with_ts(measures, Ratio::from_integer(0), time_signature)
     }
@@ -326,6 +326,7 @@ impl Sub<NoteValue> for NoteValue {
 }
 
 /// These are the unique pitch classes: [0, 12)
+/// See PitchClass for mapping to names.
 pub type PitchClassNum = u8;
 /// This is to restrict conversions to u8 using well-formed methods here.
 struct _PitchClassNum(PitchClassNum);
@@ -450,8 +451,13 @@ pub struct Pitch(Octave, PitchClassNum);
 impl Pitch {
     /// Create a pitch. In order to ensure consistency, all pitch class numbers
     /// have to go through the IntoPitchClassNum trait to be properly converted.
+    /// A handy impl is From<YourType> for PitchClass which you can use to extend the types allowed.
     pub fn new<N: IntoPitchClassNum>(octave: Octave, note_num: N) -> Pitch {
         Pitch(octave, note_num.into().0)
+    }
+    
+    pub fn middle_c() -> Pitch {
+        Pitch::new(4, PitchClass::C) // C4
     }
 
     pub fn none() -> Pitch {

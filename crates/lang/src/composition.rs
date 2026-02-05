@@ -137,6 +137,8 @@ pub struct Event {
 
 pub const MAX_VOLUME: u32 = 100;
 
+
+/// Between 0 and MAX_VOLUME
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Ord, PartialOrd, Serialize, Deserialize)]
 pub struct Volume(pub u32);
 
@@ -255,7 +257,7 @@ impl Track {
         es
     }
 
-    pub fn shift_by(&mut self, offset: Duration, time_signature: TimeSignature) {
+    pub fn shift_by(&mut self, offset: Duration) {
         self.events.iter_mut()
             .chain(self.rests.iter_mut())
             .for_each(|e|
@@ -380,7 +382,7 @@ impl Composition {
 
     pub fn shift_by(&mut self, offset: Duration) {
         self.tracks.iter_mut()
-            .for_each(|tr| tr.shift_by(offset, self.time_signature));
+            .for_each(|tr| tr.shift_by(offset));
     }
 
     pub fn transpose(&mut self, semitones: i8) {

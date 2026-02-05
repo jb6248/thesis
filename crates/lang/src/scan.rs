@@ -21,6 +21,10 @@ MusicTransform :=
 Symbol :=
   | NonTerminal
   | `:` Terminal
+  | `+` // increment pitch (this is a terminal)
+  | `-` // decrement pitch (this is a terminal)
+  | `.` (`<` NoteValue `>`)? // sound current note (this is a terminal)
+  | `*` (`<` NoteValue `>`)? // rest current note
 
 NonTerminal := [-a-zA-Z1-9/#\?]
 
@@ -329,15 +333,63 @@ impl Scanner for SymbolScanner {
     type Output = Symbol;
 
     fn scan<'a>(&self, input: &'a str) -> Result<(Self::Output, &'a str)> {
-        // if it starts with ':', use TerminalScanner
-        // otherwise, use NonTerminalScanner
+        /*
+        Symbol :=
+          | NonTerminal
+          | `:` Terminal
+          | `+` // increment pitch (this is a terminal)
+          | `-` // decrement pitch (this is a terminal)
+          | `.` (`<` NoteValue `>`)? // sound current note (this is a terminal)
+          | `*` (`<` NoteValue `>`)? // rest current note
+         */
         disjoint(
             ScanPrefix::from(":".to_string()),
-            scan_map(scan_map_input(TerminalScanner(self.0), |s| &s[1..]), |s| {
-                Symbol::T(s)
-            }),
+            scan_map(scan_map_input(TerminalScanner(self.0), |s| &s[1..]), |t| Symbol::T(t)),
             None,
-            scan_map(NonTerminalScanner, |s| Symbol::NT(NonTerminal::Custom(s))),
+            disjoint(
+                ScanPrefix::from("+".to_string()),
+                scan_map(StringScanner("+".to_string()), |_| Symbol::T(Terminal::MovePitch { semitones: 1 })),
+                None,
+                disjoint(
+                    ScanPrefix::from("-".to_string()),
+                    scan_map(StringScanner("-".to_string()), |_| Symbol::T(Terminal::MovePitch {semitones: -1})),
+                    None,
+                    disjoint(
+                        ScanPrefix::from(".".to_string()),
+                        scan_map(
+                            concat(
+                                StringScanner(".".to_string()),
+                                NoteValueScanner(self.0),
+                            ),
+                            |(_dot, note_value)| Symbol::T(Terminal::CurrentSound {
+                                duration: Duration {
+                                    value: note_value,
+                                    time_signature: self.0.time_signature,
+                                },
+                            }),
+                        ),
+                        None,
+                        disjoint(
+                            ScanPrefix::from("*".to_string()),
+                            scan_map(
+                                concat(
+                                    StringScanner("*".to_string()),
+                                    NoteValueScanner(self.0),
+                                ),
+                                |(_star, note_value)| Symbol::T(Terminal::AbsoluteSound {
+                                    duration: Duration {
+                                        value: note_value,
+                                        time_signature: self.0.time_signature,
+                                    },
+                                    note: TerminalNote::Rest,
+                                }),
+                            ),
+                            None,
+                            scan_map(NonTerminalScanner, |nt| Symbol::NT(NonTerminal::Custom(nt))),
+                        )
+                    ),
+                ),
+            ),
         )
             .scan(input)
     }
@@ -354,7 +406,7 @@ impl Scanner for TerminalScanner {
             scan_map_input(scan_map(MetaControlScanner, |s| Terminal::Meta(s)), |s| &s[1..]),
             None,
             scan_map(concat(NoteScanner, NoteValueScanner(self.0)), |(note, note_value)| {
-                Terminal::Music {
+                Terminal::AbsoluteSound {
                     note,
                     duration: Duration {
                         value: note_value,
@@ -724,6 +776,9 @@ where
     ConcatScan(scan1, scan2)
 }
 
+/// Peek at the stream using the first prefix. If it matches, use the first scanner.
+/// Otherwise, use the second scanner if the second prefix matches or if it is None.
+/// Otherwise, error.
 pub fn disjoint<S, T, U>(
     prefix1: ScanPrefix,
     scan1: S,
@@ -754,6 +809,7 @@ where
     }
 }
 
+/// The prefix is a peek, not consumed.
 impl<S, T, U> Scanner for DisjointScan<S, T>
 where
     S: Scanner<Output=U>,
@@ -1003,6 +1059,62 @@ mod test {
         assert!(result.is_err());
     }
 
+    // test for terminals parsed by SymbolScanner
+
+    #[test]
+    fn symbol_scanner_5() {
+        // test for current sound
+        let input = ".<1/4>";
+        let scanner = ConsumeScanner(SymbolScanner(ScanContext::default()));
+        let result = scanner.scan(input);
+        println!("result: {result:#?}");
+        assert!(result.is_ok());
+        assert!(matches!(result.unwrap().0, Symbol::T(Terminal::CurrentSound { .. })));
+    }
+
+    #[test]
+    fn symbol_scanner_6() {
+        // test for rest sound
+        let input = "*<1/2>";
+        let scanner = ConsumeScanner(SymbolScanner(ScanContext::default()));
+        let result = scanner.scan(input);
+        println!("result: {result:#?}");
+        assert!(result.is_ok());
+        assert!(matches!(result.unwrap().0, Symbol::T(Terminal::AbsoluteSound { note: TerminalNote::Rest, .. })));
+    }
+
+    #[test]
+    fn symbol_scanner_7() {
+        // test for pitch up
+        let input = "+";
+        let scanner = ConsumeScanner(SymbolScanner(ScanContext::default()));
+        let result = scanner.scan(input);
+        println!("result: {result:#?}");
+        assert!(result.is_ok());
+        assert!(matches!(result.unwrap().0, Symbol::T(Terminal::MovePitch { semitones: 1 })));
+    }
+
+    #[test]
+    fn symbol_scanner_8() {
+        // test for pitch down
+        let input = "-";
+        let scanner = ConsumeScanner(SymbolScanner(ScanContext::default()));
+        let result = scanner.scan(input);
+        println!("result: {result:#?}");
+        assert!(result.is_ok());
+        assert!(matches!(result.unwrap().0, Symbol::T(Terminal::MovePitch { semitones: -1 })));
+    }
+
+    #[test]
+    fn symbol_scanner_9() {
+        // test for ambiguous input (non-terminals starting with -)
+        let input = "-S";
+        let scanner = ConsumeScanner(SymbolScanner(ScanContext::default()));
+        let result = scanner.scan(input);
+        println!("result: {result:#?}");
+        assert!(result.is_err());
+    }
+
     #[test]
     fn primitive_scanner_1() {
         let input = "(";
@@ -1039,6 +1151,27 @@ mod test {
         let result = scanner.scan(input);
         println!("result: {result:#?}");
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn music_string_scanner_2() {
+        let input = ":4c<1> + :4d .<1/4> :_ * :f# :g :c ::i=piano B - +";
+        let scanner = ConsumeScanner(MusicStringScanner(ScanContext::default()));
+        let result = scanner.scan(input);
+        println!("result: {result:#?}");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn weird_music_string_scanner_1() {
+        // just need to acknowledge this unexpected parsing behavior
+        // if anyone sees this, go fix parsing for SymbolScanner to peek for non-terminal symbols after the -
+        // it's technically parsed as 2 symbols: '-' and 'S'
+        let input = "-S";
+        let scanner = ConsumeScanner(MusicStringScanner(ScanContext::default()));
+        let result = scanner.scan(input);
+        println!("result: {result:#?}");
+        assert_eq!(result.unwrap().0.0.len(), 2);
     }
 
     #[test]
@@ -1096,7 +1229,7 @@ mod test {
     }
 
     #[test]
-    fn music_string_scanner_2() {
+    fn music_string_split_scanner() {
         // with splits and repeats
         let input = "{:4c<1> :4d :_ :f# :g :c ::i=piano B | [x3][:4c<1> :4d :_ :f# :g :c ::i=piano B]}";
         let scanner = ConsumeScanner(MusicStringScanner(ScanContext::default()));
