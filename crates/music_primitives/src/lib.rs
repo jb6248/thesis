@@ -52,50 +52,6 @@ impl Display for Duration {
     }
 }
 
-// impl Duration {
-//     pub fn with(self, time_signature: TimeSignature) -> MusicTimeWithSignature {
-//         MusicTimeWithSignature {
-//             time_signature,
-//             time: self
-//         }
-//     }
-//
-//     pub fn from_seconds(time_signature: TimeSignature, bpm: BPM, seconds: Seconds) -> Self {
-//         let bps = bpm / 60.;
-//         let beats = bps * seconds;
-//         // instead of using Ratio::from_f32, I'll calculate the fraction myself
-//         let precision = 1000000.0; // to avoid floating point precision issues
-//         let numerator = (beats * precision).floor() as BeatUnit;
-//         let denominator = precision as BeatUnit;
-//         let beats = Beat(Ratio::new(numerator, denominator));
-//         beats.as_music_time(time_signature)
-//     }
-//
-//     pub fn from_whole_beats(time_signature: TimeSignature, beats: BeatUnit) -> Self {
-//         let measures = beats / time_signature.0;
-//         let beats = beats % time_signature.0;
-//         Duration(measures, Beat::whole(beats))
-//     }
-//
-//     pub fn to_seconds(&self, time_signature: TimeSignature, bpm: BPM) -> Seconds {
-//         let Duration(measures, beats) = *self;
-//         let total_beats = (measures * time_signature.0) as f32 + beats.as_float();
-//         total_beats * 60. / bpm
-//     }
-//
-//     pub fn zero() -> Self {
-//         Duration(0, Beat::zero())
-//     }
-//
-//     pub fn beats(beats: BeatUnit) -> Self {
-//         Duration(0, Beat::whole(beats))
-//     }
-//
-//     pub fn measures(measures: Measure) -> Self {
-//         Duration(measures, Beat::zero())
-//     }
-// }
-
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Ord, PartialOrd, Serialize, Deserialize)]
 pub struct TimeSignature(pub MusicNat, pub MusicNat);
 impl TimeSignature {
@@ -104,6 +60,13 @@ impl TimeSignature {
     }
     pub fn waltz() -> TimeSignature {
         TimeSignature(3, 4)
+    }
+    pub fn beat_note_value(&self) -> NoteValue {
+        NoteValue(Ratio::new(1, self.1))
+    }
+
+    pub fn as_note_value(&self, beats: Beats) -> NoteValue {
+        NoteValue(self.beat_note_value().0 * beats)
     }
 }
 impl NoteValue {
@@ -125,6 +88,10 @@ impl Duration {
         }
     }
 
+    pub fn is_zero(&self) -> bool {
+        self.value.0.is_zero()
+    }
+
     pub fn from_beats_with_ts(beats: Ratio<MusicNat>, time_signature: TimeSignature) -> Duration {
         // 1 beat in 3/4 is 1 quarter note (1/4)
         // 3 beats in 3/8 is 3 eighth notes (3/8)
@@ -138,9 +105,8 @@ impl Duration {
     pub fn measures_and_beats_with_ts(measures: Measures, beats: Ratio<MusicNat>, time_signature: TimeSignature) -> Duration {
         let TimeSignature(num, _) = time_signature;
         let total_beats = Ratio::from_integer(measures) * num + beats;
-        let note_value = NoteValue(total_beats / Ratio::from_integer(1));
         Duration {
-            value: note_value,
+            value: time_signature.as_note_value(total_beats),
             time_signature
         }
     }
@@ -454,6 +420,18 @@ impl Pitch {
     /// A handy impl is From<YourType> for PitchClass which you can use to extend the types allowed.
     pub fn new<N: IntoPitchClassNum>(octave: Octave, note_num: N) -> Pitch {
         Pitch(octave, note_num.into().0)
+    }
+    
+    pub fn octave(&self) -> Octave {
+        self.0
+    }
+    
+    pub fn note_num(&self) -> PitchClassNum {
+        self.1
+    }
+    
+    pub fn data(&self) -> (Octave, PitchClassNum) {
+        (self.0, self.1)
     }
     
     pub fn middle_c() -> Pitch {

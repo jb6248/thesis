@@ -150,7 +150,7 @@ impl Scanner for GrammarScanner {
             .into_iter()
             .filter_map(|x| x)
             .collect();
-        Ok((Grammar { start, productions }, ""))
+        Ok((Grammar { start, productions, time_signature: scan_context.time_signature }, ""))
     }
 }
 

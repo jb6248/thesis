@@ -381,6 +381,32 @@ impl Composition {
         }
         s
     }
+    
+    pub fn add_rests_to_last_measure(&mut self) -> Option<()> {
+        let end = self.get_end()?;
+        let last_measure_start = Duration::measures_with_ts(end.get_whole_measures(), self.time_signature);
+        let hanging_duration = end - last_measure_start;
+        if hanging_duration.is_zero() {
+            return Some(()); // no need to add rests
+        }
+        let rounded_end = last_measure_start + Duration::measures_with_ts(1, self.time_signature);
+        for track in &mut self.tracks {
+            if let Some(track_end) = track.get_end(self.time_signature) {
+                if track_end < rounded_end {
+                    let rest_start = track_end;
+                    let rest_duration = rounded_end - track_end;
+                    let rest_event = Event {
+                        start: rest_start,
+                        duration: rest_duration,
+                        volume: Volume(0),
+                        pitch: Pitch::none(), // pitch doesn't matter for rests
+                    };
+                    track.rests.push(rest_event);
+                }
+            }
+        }
+        Some(())
+    }
     pub fn get_duration(&self) -> Duration {
         let start = self.tracks.iter().filter_map(|t| t.get_start())
             .min();

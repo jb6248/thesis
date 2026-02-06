@@ -13,8 +13,9 @@ use std::str::FromStr;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Grammar {
-    pub(crate) start: NonTerminal,
-    pub(crate) productions: Vec<Production>,
+    pub start: NonTerminal,
+    pub productions: Vec<Production>,
+    pub time_signature: TimeSignature
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -96,8 +97,8 @@ pub enum MetaControl {
 }
 
 impl Grammar {
-    pub fn new(start: NonTerminal, productions: Vec<Production>) -> Self {
-        Grammar { start, productions }
+    pub fn new(start: NonTerminal, productions: Vec<Production>, time_signature: TimeSignature) -> Self {
+        Grammar { start, productions, time_signature }
     }
 
     pub fn get_production(&self, nt: &NonTerminal) -> Option<&Production> {
@@ -112,6 +113,18 @@ impl Grammar {
         } else {
             Some(productions[rng.random_range(0..productions.len())])
         }
+    }
+    
+    pub fn produce(&self, config: &MusicStringRenderConfig) -> MusicString {
+        let axiom = MusicString(vec![MusicPrimitive::Simple(Symbol::NT(
+            self.start.clone(),
+        ))]);
+        axiom.parallel_rewrite_n(
+            self,
+            config.randomized,
+            config.panic_on_bad_production,
+            config.iterations,
+        )
     }
 }
 
@@ -156,6 +169,14 @@ impl Default for Performer {
             pitch: Pitch::middle_c(),
         }
     }
+}
+
+pub struct MusicStringRenderConfig {
+    pub iterations: usize,
+    pub panic_on_bad_production: bool,
+    pub randomized: bool,
+    /// Rounds out composition to whole measures by padding with rests.
+    pub rounded: bool,
 }
 
 impl MusicString {
