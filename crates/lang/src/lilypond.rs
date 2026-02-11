@@ -548,8 +548,9 @@ mod render_fun {
 
     #[test]
     fn render_test_1() {
+        let filename = "02_repeat_pattern";
         let composition = compose_from_grammar(
-            "data/grammar/examples/15_rhythm_variations.mt",
+            format!("data/grammar/examples/{}.mt", filename).as_str(),
             MusicStringRenderConfig {
                 iterations: 3,
                 panic_on_bad_production: true,
@@ -558,10 +559,10 @@ mod render_fun {
             },
         )
         .unwrap();
-        let lilypond_filename = "data/lilypond/examples/15_rhythm_variations.ly";
+        let lilypond_filename = format!("data/lilypond/examples/{}.ly", filename);
         render_to_lilypond(
             composition,
-            lilypond_filename,
+            lilypond_filename.as_str(),
             Some(LilyPondConfig {
                 write_dynamics: false,
                 ..LilyPondConfig::default()
@@ -569,6 +570,6 @@ mod render_fun {
         )
         .unwrap();
 
-        call_lilypond_cli(lilypond_filename, "data/lilypond/output", true).unwrap();
+        call_lilypond_cli(lilypond_filename.as_str(), "data/lilypond/output", true).unwrap();
     }
 }
