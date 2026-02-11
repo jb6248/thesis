@@ -549,7 +549,7 @@ mod render_fun {
     #[test]
     fn render_test_1() {
         let composition = compose_from_grammar(
-            "data/grammar/examples/02_repeat_pattern.mt",
+            "data/grammar/examples/15_rhythm_variations.mt",
             MusicStringRenderConfig {
                 iterations: 3,
                 panic_on_bad_production: true,
@@ -558,7 +558,7 @@ mod render_fun {
             },
         )
         .unwrap();
-        let lilypond_filename = "data/lilypond/examples/02_repeat_pattern.ly";
+        let lilypond_filename = "data/lilypond/examples/15_rhythm_variations.ly";
         render_to_lilypond(
             composition,
             lilypond_filename,

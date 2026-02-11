@@ -465,7 +465,7 @@ impl Scanner for NoteScanner {
                             consumed += 1;
                         }
                     }
-                    Ok((TerminalNote::Note { pitch: Pitch::new(octave, note) }, &input[consumed..]))
+                    Ok((TerminalNote::Note { pitch: Pitch::new(octave, pitch_class) }, &input[consumed..]))
                 } else {
                     Err(ScanError::Generic(
                         format!("Expected Note: note name {next} is not a valid note."),
