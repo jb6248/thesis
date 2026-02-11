@@ -281,12 +281,24 @@ impl Track {
         es
     }
 
-    pub fn shift_by(&mut self, offset: Duration) {
-        self.events.iter_mut()
-            .chain(self.rests.iter_mut())
-            .for_each(|e|
-                e.start += offset
-            );
+    pub fn shift_by(&mut self, offset: Duration, insert_rests: bool) {
+        if let Some(previous_start) = self.get_start() {
+            self.events.iter_mut()
+                .chain(self.rests.iter_mut())
+                .for_each(|e|
+                    e.start += offset
+                );
+            if !offset.is_zero() && insert_rests {
+                // insert a rest at the beginning to fill the gap
+                let rest_event = Event {
+                    start: previous_start,
+                    duration: offset,
+                    volume: Volume(0),
+                    pitch: Pitch::none(), // pitch doesn't matter for rests
+                };
+                self.rests.insert(0, rest_event);
+            }
+        }
     }
 
     pub fn transpose(&mut self, semitones: i8) {
@@ -385,11 +397,12 @@ impl Composition {
     pub fn add_rests_to_last_measure(&mut self) -> Option<()> {
         let end = self.get_end()?;
         let last_measure_start = Duration::measures_with_ts(end.get_whole_measures(), self.time_signature);
-        let hanging_duration = end - last_measure_start;
-        if hanging_duration.is_zero() {
-            return Some(()); // no need to add rests
-        }
-        let rounded_end = last_measure_start + Duration::measures_with_ts(1, self.time_signature);
+        let remaining_beats = end - last_measure_start;
+        let rounded_end = last_measure_start + if !remaining_beats.is_zero() {
+            Duration::measures_with_ts(1, self.time_signature)
+        } else {
+            Duration::zero(self.time_signature)
+        };
         for track in &mut self.tracks {
             if let Some(track_end) = track.get_end(self.time_signature) {
                 if track_end < rounded_end {
@@ -430,9 +443,9 @@ impl Composition {
             .max()
     }
 
-    pub fn shift_by(&mut self, offset: Duration) {
+    pub fn shift_by(&mut self, offset: Duration, insert_rests: bool) {
         self.tracks.iter_mut()
-            .for_each(|tr| tr.shift_by(offset));
+            .for_each(|tr| tr.shift_by(offset, insert_rests));
     }
 
     pub fn transpose(&mut self, semitones: i8) {

@@ -68,6 +68,8 @@ pub struct LilyPondConfig {
     pub composer: Option<String>,
     /// Whether to write volumes
     pub write_dynamics: bool,
+    /// Maximum 2^(-n) for note duration denominators (this should be <= 0)
+    pub min_neg_power: Option<i32>,
 }
 
 impl Default for LilyPondConfig {
@@ -78,6 +80,7 @@ impl Default for LilyPondConfig {
             title: None,
             composer: None,
             write_dynamics: true,
+            min_neg_power: None
         }
     }
 }
@@ -211,20 +214,44 @@ impl LilyPondRenderer {
     }
 
     fn render_event(&self, event: &Event) -> String {
-        format!(
-            "{}{}{}",
-            self.pitch_to_lilypond(event.pitch),
-            self.duration_to_lilypond(event.duration),
-            if self.config.write_dynamics {
-                self.volume_to_lilypond_dynamics(event.volume)
-            } else {
-                "".to_string()
+        if !event.duration.binary_expandable() {
+            panic!("Event duration {:?} is not binary expandable for LilyPond rendering!", event.duration);
+        }
+        // do this for each expanded duration and tie them together with ~
+        let mut result = String::new();
+        let expanded_durations = event.duration.binary_expand(self.config.min_neg_power);
+        // tie them all together
+        for (i, dur) in expanded_durations.into_iter().enumerate() {
+            if i > 0 {
+                result.push_str("~");
             }
-        )
+            write!(
+                result,
+                "{}{}{}",
+                self.pitch_to_lilypond(event.pitch),
+                self.duration_to_lilypond(dur),
+                if self.config.write_dynamics && i == 0 {
+                    self.volume_to_lilypond_dynamics(event.volume)
+                } else {
+                    "".to_string()
+                }
+            )
+            .unwrap();
+        }
+        result.trim().to_string()
     }
 
     fn render_rest(&self, duration: Duration) -> String {
-        format!("r{}", self.duration_to_lilypond(duration))
+        // render multiple rests (no need to tie them together) based on binary expansion
+        if !duration.binary_expandable() {
+            panic!("Rest duration {:?} is not binary expandable for LilyPond rendering!", duration);
+        }
+        let expanded_durations = duration.binary_expand(self.config.min_neg_power);
+        let mut result = String::new();
+        for dur in expanded_durations {
+            write!(result, "r{} ", self.duration_to_lilypond(dur)).unwrap();
+        }
+        result.trim().to_string()
     }
 
     /// Convert a Pitch to LilyPond notation
@@ -522,7 +549,7 @@ mod render_fun {
     #[test]
     fn render_test_1() {
         let composition = compose_from_grammar(
-            "data/grammar/examples/16_relative_scale.mt",
+            "data/grammar/examples/02_repeat_pattern.mt",
             MusicStringRenderConfig {
                 iterations: 3,
                 panic_on_bad_production: true,
@@ -531,7 +558,7 @@ mod render_fun {
             },
         )
         .unwrap();
-        let lilypond_filename = "data/lilypond/examples/16_relative_scale.ly";
+        let lilypond_filename = "data/lilypond/examples/02_repeat_pattern.ly";
         render_to_lilypond(
             composition,
             lilypond_filename,

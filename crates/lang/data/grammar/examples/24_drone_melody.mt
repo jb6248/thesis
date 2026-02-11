@@ -4,7 +4,7 @@
 start DroneWithMelody
 
 // Drone just repeats the same note
-Drone = [x16][.<1/4>]
+Drone = [x8][.<1/4>]
 
 // Melody moves around using relative pitch
 Melody = .<1/4> + + .<1/4> + .<1/4> + + .<1/4> - .<1/4> - - .<1/4> - .<1/4> - - .<1/4>

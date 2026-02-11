@@ -294,7 +294,7 @@ impl MusicString {
                         .map(|ms| ms.compose_v1(time_signature, Some(current_instrument)))
                         .err_first()?
                         .map(|mut c| {
-                            c.shift_by(current_mt);
+                            c.shift_by(current_mt, true);
                             c
                         })
                         .map(|c| (c.get_duration(), c))
@@ -328,7 +328,7 @@ impl MusicString {
                             let mut composed =
                                 content.compose_v1(time_signature, Some(current_instrument))?;
                             composed.transpose(*semitones);
-                            composed.shift_by(current_mt);
+                            composed.shift_by(current_mt, true);
                             let duration = composed.get_duration();
                             add_composition(&mut tracks, composed);
                             duration
@@ -340,7 +340,7 @@ impl MusicString {
                             let mut offset = current_mt;
                             for _i in 0..*num {
                                 let mut comp_i = composed.clone();
-                                comp_i.shift_by(offset);
+                                comp_i.shift_by(offset, true);
                                 add_composition(&mut tracks, comp_i);
                                 offset = offset + duration;
                             }
@@ -356,7 +356,7 @@ impl MusicString {
                             let mut composed =
                                 content.compose_v1(time_signature, Some(current_instrument))?;
                             composed.compress(*factor);
-                            composed.shift_by(current_mt);
+                            composed.shift_by(current_mt, true);
                             let duration = composed.get_duration();
                             add_composition(&mut tracks, composed);
                             duration
@@ -492,7 +492,7 @@ impl MusicString {
                         .map(|ms| ms.compose_v2(time_signature, performer.clone()))
                         .err_first()?
                         .map(|mut c| {
-                            c.shift_by(offset);
+                            c.shift_by(offset, true);
                             c
                         })
                         .map(|c| (c.get_duration(), c))
@@ -514,8 +514,9 @@ impl MusicString {
                         }
                         // otherwise, add each track to the tracks
                         for (_d, comp) in comps {
-                            for track in comp.tracks {
+                            for mut track in comp.tracks {
                                 let track_id = get_next_track_id(&tracks);
+                                track.identifier = TrackId::Custom(track_id);
                                 tracks.insert(track_id, track);
                             }
                         }
@@ -524,11 +525,11 @@ impl MusicString {
                 }
                 MusicPrimitive::Transform { transform, content } => {
                     let mut inner = content.compose_v2(time_signature, performer.clone())?;
-                    inner.shift_by(offset);
                     match transform {
                         MusicTransform::Transpose { semitones } => {
                             inner.transpose(*semitones);
                             let duration = inner.get_duration();
+                            inner.shift_by(offset, true);
                             for mut track in inner.tracks {
                                 let track_id = get_next_track_id(&tracks);
                                 track.identifier = TrackId::Custom(track_id);
@@ -538,6 +539,7 @@ impl MusicString {
                         }
                         MusicTransform::Compression { factor } => {
                             inner.compress(*factor);
+                            inner.shift_by(offset, true);
                             let duration = inner.get_duration();
                             for mut track in inner.tracks {
                                 let track_id = get_next_track_id(&tracks);
@@ -551,7 +553,7 @@ impl MusicString {
                             let mut total_duration = Duration::zero(time_signature);
                             for _ in 0..*num {
                                 let mut repeat_inner = inner.clone();
-                                repeat_inner.shift_by(offset + total_duration);
+                                repeat_inner.shift_by(offset + total_duration, true);
                                 // this could be cleaned up by merging the same tracks from
                                 // repeat compositions
                                 for mut track in repeat_inner.tracks {
