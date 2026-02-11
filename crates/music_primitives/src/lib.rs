@@ -1,4 +1,5 @@
 use std::cmp::Ordering;
+use std::collections::BTreeMap;
 use std::fmt::{Display, Formatter};
 use std::ops::{Add, AddAssign, Mul, Sub};
 use serde::{Deserialize, Serialize};
@@ -52,49 +53,37 @@ impl Display for Duration {
     }
 }
 
-// impl Duration {
-//     pub fn with(self, time_signature: TimeSignature) -> MusicTimeWithSignature {
-//         MusicTimeWithSignature {
-//             time_signature,
-//             time: self
-//         }
-//     }
-//
-//     pub fn from_seconds(time_signature: TimeSignature, bpm: BPM, seconds: Seconds) -> Self {
-//         let bps = bpm / 60.;
-//         let beats = bps * seconds;
-//         // instead of using Ratio::from_f32, I'll calculate the fraction myself
-//         let precision = 1000000.0; // to avoid floating point precision issues
-//         let numerator = (beats * precision).floor() as BeatUnit;
-//         let denominator = precision as BeatUnit;
-//         let beats = Beat(Ratio::new(numerator, denominator));
-//         beats.as_music_time(time_signature)
-//     }
-//
-//     pub fn from_whole_beats(time_signature: TimeSignature, beats: BeatUnit) -> Self {
-//         let measures = beats / time_signature.0;
-//         let beats = beats % time_signature.0;
-//         Duration(measures, Beat::whole(beats))
-//     }
-//
-//     pub fn to_seconds(&self, time_signature: TimeSignature, bpm: BPM) -> Seconds {
-//         let Duration(measures, beats) = *self;
-//         let total_beats = (measures * time_signature.0) as f32 + beats.as_float();
-//         total_beats * 60. / bpm
-//     }
-//
-//     pub fn zero() -> Self {
-//         Duration(0, Beat::zero())
-//     }
-//
-//     pub fn beats(beats: BeatUnit) -> Self {
-//         Duration(0, Beat::whole(beats))
-//     }
-//
-//     pub fn measures(measures: Measure) -> Self {
-//         Duration(measures, Beat::zero())
-//     }
-// }
+/// Decompose a Ratio into integer coefficients of powers of two,
+/// with maximum power = 0.
+///
+/// Returns a Vec of (power, coefficient), where power <= 0.
+///
+/// Used to decompose a NoteValue into a sum of standard note values (1, 1/2, 1/4, 1/8, etc.)
+fn ratio_to_powers_of_two(
+    mut r: Ratio<MusicNat>,
+    min_power: i32,
+) -> Vec<(i32, MusicNat)> {
+    let mut result = Vec::new();
+
+    for power in (min_power..=0).rev() {
+        if r.is_zero() {
+            break;
+        }
+
+        let unit = Ratio::new(2, 1).pow(power);
+
+        // coefficient = floor(r / unit)
+        let coeff = (r.clone() / unit.clone()).floor().to_integer();
+
+        if coeff != 0 {
+            result.push((power, coeff));
+            r -= unit * coeff;
+        }
+    }
+
+    result
+}
+
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Ord, PartialOrd, Serialize, Deserialize)]
 pub struct TimeSignature(pub MusicNat, pub MusicNat);
@@ -105,16 +94,60 @@ impl TimeSignature {
     pub fn waltz() -> TimeSignature {
         TimeSignature(3, 4)
     }
+    pub fn beat_note_value(&self) -> NoteValue {
+        NoteValue(Ratio::new(1, self.1))
+    }
+
+    pub fn as_note_value(&self, beats: Beats) -> NoteValue {
+        NoteValue(self.beat_note_value().0 * beats)
+    }
 }
 impl NoteValue {
     pub fn new(numerator: MusicNat, denominator: MusicNat) -> NoteValue {
         NoteValue(Ratio::new(numerator, denominator))
     }
+
+    pub fn is_zero(&self) -> bool {
+        self.0.is_zero()
+    }
+
     pub fn with(&self, time_signature: TimeSignature) -> Duration {
         Duration {
             value: *self,
             time_signature: time_signature
         }
+    }
+
+    /// Decompose this NoteValue into a sum of standard note values (1, 1/2, 1/4, 1/8, etc.)
+    /// This works well assuming that the note value can be expressed as a sum of powers of two.
+    /// The minimum power is the smallest power of two to consider. For example, if min_power = -3, then the smallest note value considered is 1/8.
+    /// This is useful for rendering a NoteValue as a combination of standard note values, which is important for readability and playability.
+    /// The result will be sorted from largest to smallest power.
+    pub fn binary_expand(&self, min_power: Option<i32>) -> Vec<NoteValue> {
+        let expansion = ratio_to_powers_of_two(self.0, min_power.unwrap_or(-30));
+        expansion.into_iter()
+            .flat_map(|(power, coeff)| {
+                let nv = NoteValue(Ratio::new(1, 2u32.pow((-power) as u32)));
+                std::iter::repeat(nv).take(coeff as usize)
+            })
+            .collect()
+    }
+
+    pub fn binary_expandable(&self) -> bool {
+        let denom = *self.0.denom();
+        let factors = prime_factorization(denom as u64);
+        for (prime, _) in factors {
+            if prime != 2 {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Find the coefficient for the denominator after all 2s have been factored out.
+    /// For example, if it is 7/24, remove 2^3 and you're left with a 3.
+    pub fn get_remaining_prime_factor(&self) -> MusicNat {
+        unimplemented!()
     }
 }
 impl Duration {
@@ -123,6 +156,10 @@ impl Duration {
             value: NoteValue::new(0, 1),
             time_signature: time_signature
         }
+    }
+
+    pub fn is_zero(&self) -> bool {
+        self.value.0.is_zero()
     }
 
     pub fn from_beats_with_ts(beats: Ratio<MusicNat>, time_signature: TimeSignature) -> Duration {
@@ -138,9 +175,8 @@ impl Duration {
     pub fn measures_and_beats_with_ts(measures: Measures, beats: Ratio<MusicNat>, time_signature: TimeSignature) -> Duration {
         let TimeSignature(num, _) = time_signature;
         let total_beats = Ratio::from_integer(measures) * num + beats;
-        let note_value = NoteValue(total_beats / Ratio::from_integer(1));
         Duration {
-            value: note_value,
+            value: time_signature.as_note_value(total_beats),
             time_signature
         }
     }
@@ -181,6 +217,20 @@ impl Duration {
         let beats = self.get_beats().to_f32().unwrap();
         // units: beats * (minutes / beats) * (seconds / minute) = seconds
         beats / bpm * 60.0
+    }
+
+    pub fn binary_expand(&self, min_power: Option<i32>) -> Vec<Duration> {
+        let note_value_expansion = self.value.binary_expand(min_power);
+        note_value_expansion.into_iter()
+            .map(|nv| Duration {
+                value: nv,
+                time_signature: self.time_signature
+            })
+            .collect()
+    }
+
+    pub fn binary_expandable(&self) -> bool {
+        self.value.binary_expandable()
     }
 }
 
@@ -456,6 +506,18 @@ impl Pitch {
         Pitch(octave, note_num.into().0)
     }
     
+    pub fn octave(&self) -> Octave {
+        self.0
+    }
+    
+    pub fn note_num(&self) -> PitchClassNum {
+        self.1
+    }
+    
+    pub fn data(&self) -> (Octave, PitchClassNum) {
+        (self.0, self.1)
+    }
+    
     pub fn middle_c() -> Pitch {
         Pitch::new(4, PitchClass::C) // C4
     }
@@ -517,6 +579,117 @@ impl Pitch {
         let mut new_pitch = self.clone();
         new_pitch.transpose(semitones);
         new_pitch
+    }
+}
+
+
+/// Get the prime factorization of a number as a BTreeMap of prime -> exponent
+/// ChatGPT wrote this.
+fn prime_factorization(mut n: u64) -> BTreeMap<u64, u32> {
+    let mut factors = BTreeMap::new();
+
+    // Factor out 2s
+    while n % 2 == 0 {
+        *factors.entry(2).or_insert(0) += 1;
+        n /= 2;
+    }
+
+    // Odd factors
+    let mut p = 3;
+    while p * p <= n {
+        while n % p == 0 {
+            *factors.entry(p).or_insert(0) += 1;
+            n /= p;
+        }
+        p += 2;
+    }
+
+    // Remainder is prime
+    if n > 1 {
+        *factors.entry(n).or_insert(0) += 1;
+    }
+
+    factors
+}
+
+#[cfg(test)]
+mod note_value_tests {
+    use super::*;
+
+    #[test]
+    fn test_prime_factorization() {
+        let factors = prime_factorization(60);
+        let mut expected = BTreeMap::new();
+        expected.insert(2, 2);
+        expected.insert(3, 1);
+        expected.insert(5, 1);
+        assert_eq!(factors, expected);
+
+        let factors = prime_factorization(97);
+        let mut expected = BTreeMap::new();
+        expected.insert(97, 1);
+        assert_eq!(factors, expected);
+
+        let factors = prime_factorization(1);
+        let expected: BTreeMap<u64, u32> = BTreeMap::new();
+        assert_eq!(factors, expected);
+
+        let factors = prime_factorization(39270);
+        let mut expected = BTreeMap::new();
+        expected.insert(2, 1);
+        expected.insert(3, 1);
+        expected.insert(5, 1);
+        expected.insert(7, 1);
+        expected.insert(11, 1);
+        expected.insert(17, 1);
+        assert_eq!(factors, expected);
+    }
+
+
+    #[test]
+    fn test_ratio_to_powers_of_two() {
+        let r = Ratio::new(7, 8);
+        let powers = ratio_to_powers_of_two(r, -30);
+        assert_eq!(powers, vec![(-1, 1), (-2, 1), (-3, 1)]); // 1/2 + 1/4 + 1/8 = 7/8
+
+        let r = Ratio::new(3, 1);
+        let powers = ratio_to_powers_of_two(r, -30);
+        assert_eq!(powers, vec![(0, 3)]); // 3
+    }
+
+    #[test]
+    fn exact_powers_of_two() {
+        let r = Ratio::new(1, 8);
+        let powers = ratio_to_powers_of_two(r, -30);
+        assert_eq!(powers, vec![(-3, 1)]); // 1/8
+
+        let r = Ratio::new(1, 4);
+        let powers = ratio_to_powers_of_two(r, -30);
+        assert_eq!(powers, vec![(-2, 1)]); // 1/4
+
+        let r = Ratio::new(1, 2);
+        let powers = ratio_to_powers_of_two(r, -30);
+        assert_eq!(powers, vec![(-1, 1)]); // 1/2
+
+        let r = Ratio::new(1, 1);
+        let powers = ratio_to_powers_of_two(r, -30);
+        assert_eq!(powers, vec![(0, 1)]); // 1
+    }
+
+
+    #[test]
+    fn test_note_value_decomposition() {
+        let note_value = NoteValue(Ratio::new(7, 8));
+        let expansion = note_value.binary_expand(Some(-3));
+        assert_eq!(expansion, vec![NoteValue(Ratio::new(1, 2)), NoteValue(Ratio::new(1, 4)), NoteValue(Ratio::new(1, 8))]);
+
+        let note_value = NoteValue(Ratio::new(7, 4));
+        let expansion = note_value.binary_expand(Some(-3));
+        assert_eq!(expansion, vec![NoteValue(Ratio::new(1, 1)), NoteValue(Ratio::new(1, 2)), NoteValue(Ratio::new(1, 4))]);
+
+        let note_value = NoteValue(Ratio::new(3, 1));
+        let expansion = note_value.binary_expand(Some(-3));
+        assert_eq!(expansion, vec![NoteValue(Ratio::new(1, 1)), NoteValue(Ratio::new(1, 1)), NoteValue(Ratio::new(1, 1))]);
     }
 }
 

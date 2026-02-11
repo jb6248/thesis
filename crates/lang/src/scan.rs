@@ -150,7 +150,7 @@ impl Scanner for GrammarScanner {
             .into_iter()
             .filter_map(|x| x)
             .collect();
-        Ok((Grammar { start, productions }, ""))
+        Ok((Grammar { start, productions, time_signature: scan_context.time_signature }, ""))
     }
 }
 
@@ -465,7 +465,7 @@ impl Scanner for NoteScanner {
                             consumed += 1;
                         }
                     }
-                    Ok((TerminalNote::Note { pitch: Pitch::new(octave, note) }, &input[consumed..]))
+                    Ok((TerminalNote::Note { pitch: Pitch::new(octave, pitch_class) }, &input[consumed..]))
                 } else {
                     Err(ScanError::Generic(
                         format!("Expected Note: note name {next} is not a valid note."),

@@ -13,8 +13,9 @@ use std::str::FromStr;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Grammar {
-    pub(crate) start: NonTerminal,
-    pub(crate) productions: Vec<Production>,
+    pub start: NonTerminal,
+    pub productions: Vec<Production>,
+    pub time_signature: TimeSignature
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -96,8 +97,8 @@ pub enum MetaControl {
 }
 
 impl Grammar {
-    pub fn new(start: NonTerminal, productions: Vec<Production>) -> Self {
-        Grammar { start, productions }
+    pub fn new(start: NonTerminal, productions: Vec<Production>, time_signature: TimeSignature) -> Self {
+        Grammar { start, productions, time_signature }
     }
 
     pub fn get_production(&self, nt: &NonTerminal) -> Option<&Production> {
@@ -112,6 +113,18 @@ impl Grammar {
         } else {
             Some(productions[rng.random_range(0..productions.len())])
         }
+    }
+    
+    pub fn produce(&self, config: &MusicStringRenderConfig) -> MusicString {
+        let axiom = MusicString(vec![MusicPrimitive::Simple(Symbol::NT(
+            self.start.clone(),
+        ))]);
+        axiom.parallel_rewrite_n(
+            self,
+            config.randomized,
+            config.panic_on_bad_production,
+            config.iterations,
+        )
     }
 }
 
@@ -156,6 +169,14 @@ impl Default for Performer {
             pitch: Pitch::middle_c(),
         }
     }
+}
+
+pub struct MusicStringRenderConfig {
+    pub iterations: usize,
+    pub panic_on_bad_production: bool,
+    pub randomized: bool,
+    /// Rounds out composition to whole measures by padding with rests.
+    pub rounded: bool,
 }
 
 impl MusicString {
@@ -273,7 +294,7 @@ impl MusicString {
                         .map(|ms| ms.compose_v1(time_signature, Some(current_instrument)))
                         .err_first()?
                         .map(|mut c| {
-                            c.shift_by(current_mt);
+                            c.shift_by(current_mt, true);
                             c
                         })
                         .map(|c| (c.get_duration(), c))
@@ -307,7 +328,7 @@ impl MusicString {
                             let mut composed =
                                 content.compose_v1(time_signature, Some(current_instrument))?;
                             composed.transpose(*semitones);
-                            composed.shift_by(current_mt);
+                            composed.shift_by(current_mt, true);
                             let duration = composed.get_duration();
                             add_composition(&mut tracks, composed);
                             duration
@@ -319,7 +340,7 @@ impl MusicString {
                             let mut offset = current_mt;
                             for _i in 0..*num {
                                 let mut comp_i = composed.clone();
-                                comp_i.shift_by(offset);
+                                comp_i.shift_by(offset, true);
                                 add_composition(&mut tracks, comp_i);
                                 offset = offset + duration;
                             }
@@ -335,7 +356,7 @@ impl MusicString {
                             let mut composed =
                                 content.compose_v1(time_signature, Some(current_instrument))?;
                             composed.compress(*factor);
-                            composed.shift_by(current_mt);
+                            composed.shift_by(current_mt, true);
                             let duration = composed.get_duration();
                             add_composition(&mut tracks, composed);
                             duration
@@ -471,7 +492,7 @@ impl MusicString {
                         .map(|ms| ms.compose_v2(time_signature, performer.clone()))
                         .err_first()?
                         .map(|mut c| {
-                            c.shift_by(offset);
+                            c.shift_by(offset, true);
                             c
                         })
                         .map(|c| (c.get_duration(), c))
@@ -493,8 +514,9 @@ impl MusicString {
                         }
                         // otherwise, add each track to the tracks
                         for (_d, comp) in comps {
-                            for track in comp.tracks {
+                            for mut track in comp.tracks {
                                 let track_id = get_next_track_id(&tracks);
+                                track.identifier = TrackId::Custom(track_id);
                                 tracks.insert(track_id, track);
                             }
                         }
@@ -503,22 +525,25 @@ impl MusicString {
                 }
                 MusicPrimitive::Transform { transform, content } => {
                     let mut inner = content.compose_v2(time_signature, performer.clone())?;
-                    inner.shift_by(offset);
                     match transform {
                         MusicTransform::Transpose { semitones } => {
                             inner.transpose(*semitones);
                             let duration = inner.get_duration();
-                            for track in inner.tracks {
+                            inner.shift_by(offset, true);
+                            for mut track in inner.tracks {
                                 let track_id = get_next_track_id(&tracks);
+                                track.identifier = TrackId::Custom(track_id);
                                 tracks.insert(track_id, track);
                             }
                             duration
                         }
                         MusicTransform::Compression { factor } => {
                             inner.compress(*factor);
+                            inner.shift_by(offset, true);
                             let duration = inner.get_duration();
-                            for track in inner.tracks {
+                            for mut track in inner.tracks {
                                 let track_id = get_next_track_id(&tracks);
+                                track.identifier = TrackId::Custom(track_id);
                                 tracks.insert(track_id, track);
                             }
                             duration
@@ -526,13 +551,14 @@ impl MusicString {
                         MusicTransform::Repeat { num } => {
                             let single_duration = inner.get_duration();
                             let mut total_duration = Duration::zero(time_signature);
-                            for i in 0..*num {
+                            for _ in 0..*num {
                                 let mut repeat_inner = inner.clone();
-                                repeat_inner.shift_by(offset + total_duration);
+                                repeat_inner.shift_by(offset + total_duration, true);
                                 // this could be cleaned up by merging the same tracks from
                                 // repeat compositions
-                                for track in repeat_inner.tracks {
+                                for mut track in repeat_inner.tracks {
                                     let track_id = get_next_track_id(&tracks);
+                                    track.identifier = TrackId::Custom(track_id);
                                     tracks.insert(track_id, track);
                                 }
                                 total_duration = total_duration + single_duration;
@@ -541,15 +567,18 @@ impl MusicString {
                         }
                     }
                 }
-                _ => {
-                    panic!("Repeat is deprecated, use Transform instead");
+                mp => {
+                    panic!("Compose_v2 does not support the primitive {:?}", mp);
                 }
             };
             offset += duration;
         }
-        Err(ComposeError::MismatchedLengths(
-            "Not implemented yet".to_string(),
-        ))
+        Ok(Composition {
+            tracks: tracks.into_iter()
+                .map(|(_id, track)| track)
+                .collect(),
+            time_signature,
+        })
     }
 
     /// Rewrites the music string according to the grammar, replacing non-terminals with their productions.

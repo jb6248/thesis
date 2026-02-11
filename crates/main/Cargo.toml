@@ -5,3 +5,5 @@ edition = "2024"
 
 [dependencies]
 music_primitives = { path = "../music_primitives" }
+rand = "0.10.0"
+rayon = "1.11.0"
