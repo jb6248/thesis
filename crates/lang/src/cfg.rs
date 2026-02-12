@@ -24,6 +24,20 @@ pub struct Production(pub NonTerminal, pub MusicString);
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MusicString(pub Vec<MusicPrimitive>);
 
+
+/// This is like a music string but retains the non-terminals in a tree structure.
+/// The root will always either be a production or a primitive.
+/// Since MusicPrimitives contain MusicStrings (recursive structure), those internal strings
+/// need to be converted into GrammarDerivations upon production.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum GrammarDerivation {
+    Production {
+        nt: NonTerminal,
+        content: Vec<GrammarDerivation>,
+    },
+    Terminal(MusicPrimitive),
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum MusicPrimitive {
