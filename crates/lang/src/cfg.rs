@@ -2,7 +2,7 @@ use crate::cfg::TimeCompression;
 use crate::composition::*;
 use crate::scan::Scanner;
 use crate::scan::{GrammarScanner, ScanError, consume};
-use music_primitives::{Duration, Pitch, TimeSignature};
+use music_primitives::{Duration, MusicNat, Pitch, TimeSignature};
 use num::Zero;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
@@ -535,6 +535,19 @@ impl MusicString {
                                 track.identifier = TrackId::Custom(track_id);
                                 tracks.insert(track_id, track);
                             }
+                            // add rests for this one because the current track isn't being added to
+                            add_event(
+                                &mut tracks,
+                                current_track_id,
+                                Event {
+                                    start: offset,
+                                    duration,
+                                    volume: performer.volume,
+                                    pitch: performer.pitch,
+                                },
+                                &performer,
+                                true,
+                            );
                             duration
                         }
                         MusicTransform::Compression { factor } => {
@@ -546,24 +559,64 @@ impl MusicString {
                                 track.identifier = TrackId::Custom(track_id);
                                 tracks.insert(track_id, track);
                             }
+                            add_event(
+                                &mut tracks,
+                                current_track_id,
+                                Event {
+                                    start: offset,
+                                    duration,
+                                    volume: performer.volume,
+                                    pitch: performer.pitch,
+                                },
+                                &performer,
+                                true,
+                            );
                             duration
                         }
                         MusicTransform::Repeat { num } => {
                             let single_duration = inner.get_duration();
-                            let mut total_duration = Duration::zero(time_signature);
-                            for _ in 0..*num {
-                                let mut repeat_inner = inner.clone();
-                                repeat_inner.shift_by(offset + total_duration, true);
-                                // this could be cleaned up by merging the same tracks from
-                                // repeat compositions
-                                for mut track in repeat_inner.tracks {
-                                    let track_id = get_next_track_id(&tracks);
-                                    track.identifier = TrackId::Custom(track_id);
-                                    tracks.insert(track_id, track);
+
+                            // for each track in the inner track, repeat it num times
+                            for track in inner.tracks {
+                                let id = get_next_track_id(&tracks);
+                                let mut repeated_track = Track {
+                                    identifier: TrackId::Custom(id),
+                                    events: vec![],
+                                    rests: vec![],
+                                    instrument: track.instrument,
+                                };
+                                let track_duration = track.get_duration(time_signature);
+                                for _ in 0..*num {
+                                    repeated_track.append(&track, time_signature);
+                                    // add a rest at the end to pad it to the duration of the whole inner
+                                    repeated_track.rests.push(Event {
+                                        start: repeated_track.get_end(time_signature).unwrap_or(Duration::zero(time_signature)),
+                                        duration: single_duration - track_duration,
+                                        volume: Volume(0),
+                                        pitch: Pitch::none(),
+                                    });
                                 }
-                                total_duration = total_duration + single_duration;
+                                repeated_track.shift_by(offset, true);
+                                // then add it to the tracks
+                                tracks.insert(
+                                    id,
+                                    repeated_track,
+                                );
                             }
-                            total_duration
+                            add_event(
+                                &mut tracks,
+                                current_track_id,
+                                Event {
+                                    start: offset,
+                                    duration: single_duration * *num as MusicNat,
+                                    volume: performer.volume,
+                                    pitch: performer.pitch,
+                                },
+                                &performer,
+                                true,
+                            );
+                            println!("total duration for {num} repeats is {:?}, or {:?} * {num}", single_duration * *num as MusicNat, single_duration);
+                            single_duration * *num as MusicNat
                         }
                     }
                 }

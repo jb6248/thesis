@@ -633,7 +633,7 @@ mod render_fun {
 
     #[test]
     fn render_test_1() {
-        let filename = "02_repeat_pattern";
+        let filename = "26_repeat_split"; // "02_repeat_pattern";
         let composition = compose_from_grammar(
             format!("data/grammar/examples/{}.mt", filename).as_str(),
             MusicStringRenderConfig {

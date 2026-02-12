@@ -15,7 +15,7 @@ pub struct TimeCompression(pub Ratio<isize>);
 impl Serialize for TimeCompression {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
-        S: Serializer
+        S: Serializer,
     {
         let mut state = serializer.serialize_struct("TimeCompression", 1)?;
         state.serialize_field("numerator", &self.0.numer())?;
@@ -27,7 +27,7 @@ impl Serialize for TimeCompression {
 impl<'de> Deserialize<'de> for TimeCompression {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
-        D: serde::Deserializer<'de>
+        D: serde::Deserializer<'de>,
     {
         #[derive(Deserialize)]
         struct TimeCompression {
@@ -36,7 +36,10 @@ impl<'de> Deserialize<'de> for TimeCompression {
         }
 
         let data = TimeCompression::deserialize(deserializer)?;
-        Ok(TimeCompression(Ratio::new(data.numerator, data.denominator)))
+        Ok(TimeCompression(Ratio::new(
+            data.numerator,
+            data.denominator,
+        )))
     }
 }
 
@@ -85,7 +88,9 @@ mod test {
     // }
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, PartialOrd, Serialize, Deserialize, EnumValues)]
+#[derive(
+    Debug, Copy, Clone, Eq, PartialEq, Hash, PartialOrd, Serialize, Deserialize, EnumValues,
+)]
 pub enum Instrument {
     SineWave,
     Piano,
@@ -107,9 +112,8 @@ impl Instrument {
         // matches!(self, Instrument::Drum | Instrument::Snare | Instrument::Cymbal)
         false
     }
-    pub fn str_values() -> impl Iterator<Item=(Instrument, String)> {
-        Instrument::values()
-            .map(|i| (i, format!("{:?}", i)))
+    pub fn str_values() -> impl Iterator<Item = (Instrument, String)> {
+        Instrument::values().map(|i| (i, format!("{:?}", i)))
     }
 }
 
@@ -136,7 +140,6 @@ pub struct Event {
 }
 
 pub const MAX_VOLUME: u32 = 100;
-
 
 /// Between 0 and MAX_VOLUME
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Ord, PartialOrd, Serialize, Deserialize)]
@@ -173,7 +176,13 @@ fn max_option<T: Ord>(a: Option<T>, b: Option<T>) -> Option<T> {
 }
 
 impl Track {
-    pub fn visualize(&self, columns: usize, time_signature: TimeSignature, start: Duration, end: Duration) -> String {
+    pub fn visualize(
+        &self,
+        columns: usize,
+        time_signature: TimeSignature,
+        start: Duration,
+        end: Duration,
+    ) -> String {
         let mut s = String::new();
         s.push('[');
         let bpm = 1.;
@@ -201,13 +210,15 @@ impl Track {
         s
     }
     fn get_events_at(&self, time: Duration, time_signature: TimeSignature) -> Vec<Event> {
-        self.events.iter()
+        self.events
+            .iter()
             .filter(|e| time >= e.start && time <= e.get_end(time_signature))
             .map(|e| *e)
             .collect()
     }
     fn get_rests_at(&self, time: Duration, time_signature: TimeSignature) -> Vec<Event> {
-        self.rests.iter()
+        self.rests
+            .iter()
             .filter(|e| time >= e.start && time <= e.get_end(time_signature))
             .map(|e| *e)
             .collect()
@@ -215,27 +226,25 @@ impl Track {
 
     /// Get start of track (including rests)
     pub fn get_start(&self) -> Option<Duration> {
-        min_option(self.events.iter()
-                       .map(|e| e.start)
-                       .min(), self.rests.iter()
-                       .map(|e| e.start)
-                       .min())
+        min_option(
+            self.events.iter().map(|e| e.start).min(),
+            self.rests.iter().map(|e| e.start).min(),
+        )
     }
 
     /// Get end of track (including rests)
     pub fn get_end(&self, time_signature: TimeSignature) -> Option<Duration> {
-        max_option(self.events.iter()
-                       .map(|e| e.get_end(time_signature))
-                       .max(), self.rests.iter()
-                       .map(|e| e.get_end(time_signature))
-                       .max())
+        max_option(
+            self.events.iter().map(|e| e.get_end(time_signature)).max(),
+            self.rests.iter().map(|e| e.get_end(time_signature)).max(),
+        )
     }
 
     /// Validate the track by making sure that there are no overlaps or gaps between
     /// the start and the end. If there are gaps, they should be filled with rests, but
     /// this method does not do that.
     pub fn validate_contiguous(&self) -> bool {
-        let mut all_events = self.events.clone();
+        let mut all_events = self.events.clone().into_iter().chain(self.rests.clone().into_iter()).collect::<Vec<_>>();
         all_events.sort_by(|a, b| a.start.cmp(&b.start));
         if all_events.is_empty() {
             return true;
@@ -255,17 +264,19 @@ impl Track {
 
     pub fn get_duration(&self, time_signature: TimeSignature) -> Duration {
         self.get_start()
-            .map(|start| self.get_end(time_signature).map(
-                |end|
-                    end - start
-            ))
+            .map(|start| self.get_end(time_signature).map(|end| end - start))
             .flatten()
             .unwrap_or(Duration::zero(time_signature))
     }
 
     /// End is always inclusive
     /// Doesn't include rests
-    pub fn get_events_starting_between(&self, start: Duration, end: Duration, start_exclusive: bool) -> Vec<Event> {
+    pub fn get_events_starting_between(
+        &self,
+        start: Duration,
+        end: Duration,
+        start_exclusive: bool,
+    ) -> Vec<Event> {
         if (start_exclusive && start >= end) || start > end {
             return Vec::new();
         }
@@ -283,11 +294,10 @@ impl Track {
 
     pub fn shift_by(&mut self, offset: Duration, insert_rests: bool) {
         if let Some(previous_start) = self.get_start() {
-            self.events.iter_mut()
+            self.events
+                .iter_mut()
                 .chain(self.rests.iter_mut())
-                .for_each(|e|
-                    e.start += offset
-                );
+                .for_each(|e| e.start += offset);
             if !offset.is_zero() && insert_rests {
                 // insert a rest at the beginning to fill the gap
                 let rest_event = Event {
@@ -310,7 +320,8 @@ impl Track {
     /// Flip entire track, keeping it within its start/end bounds.
     pub fn reverse(&mut self, time_signature: TimeSignature) {
         if let (Some(start), Some(end)) = (self.get_start(), self.get_end(time_signature)) {
-            self.events.iter_mut()
+            self.events
+                .iter_mut()
                 .chain(self.rests.iter_mut())
                 .for_each(|e| {
                     let offset = e.start - start;
@@ -329,9 +340,13 @@ impl Track {
         if factor < Ratio::new(0, 1) {
             self.reverse(time_signature);
         }
-        let factor = Ratio::new(factor.numer().abs() as MusicNat, factor.denom().abs() as MusicNat);
+        let factor = Ratio::new(
+            factor.numer().abs() as MusicNat,
+            factor.denom().abs() as MusicNat,
+        );
         if let (Some(start), Some(end)) = (self.get_start(), self.get_end(time_signature)) {
-            self.events.iter_mut()
+            self.events
+                .iter_mut()
                 .chain(self.rests.iter_mut())
                 .for_each(|e| {
                     let offset = (e.start - start) * factor;
@@ -339,6 +354,42 @@ impl Track {
                     e.duration = e.duration * factor;
                 });
         }
+    }
+
+    /// Append another track to the end of this track.
+    /// The other track's events will be shifted to start after this track ends.
+    /// Panics if the instruments don't match.
+    pub fn append(&mut self, other: &Track, time_signature: TimeSignature) {
+        if self.instrument != other.instrument {
+            panic!(
+                "Cannot append tracks with different instruments: {:?} and {:?}",
+                self.instrument, other.instrument
+            );
+        }
+
+        // Calculate where this track ends
+        let append_offset = self
+            .get_end(time_signature)
+            .unwrap_or(Duration::zero(time_signature))
+            - other.get_start().unwrap_or(Duration::zero(time_signature));
+
+        // Shift and append all events from the other track
+        for event in &other.events {
+            let mut shifted_event = *event;
+            shifted_event.start = shifted_event.start + append_offset;
+            self.events.push(shifted_event);
+        }
+
+        // Shift and append all rests from the other track
+        for rest in &other.rests {
+            let mut shifted_rest = *rest;
+            shifted_rest.start = shifted_rest.start + append_offset;
+            self.rests.push(shifted_rest);
+        }
+
+        // Keep events and rests sorted
+        self.events.sort();
+        self.rests.sort();
     }
 }
 
@@ -393,16 +444,18 @@ impl Composition {
         }
         s
     }
-    
+
     pub fn add_rests_to_last_measure(&mut self) -> Option<()> {
         let end = self.get_end()?;
-        let last_measure_start = Duration::measures_with_ts(end.get_whole_measures(), self.time_signature);
+        let last_measure_start =
+            Duration::measures_with_ts(end.get_whole_measures(), self.time_signature);
         let remaining_beats = end - last_measure_start;
-        let rounded_end = last_measure_start + if !remaining_beats.is_zero() {
-            Duration::measures_with_ts(1, self.time_signature)
-        } else {
-            Duration::zero(self.time_signature)
-        };
+        let rounded_end = last_measure_start
+            + if !remaining_beats.is_zero() {
+                Duration::measures_with_ts(1, self.time_signature)
+            } else {
+                Duration::zero(self.time_signature)
+            };
         for track in &mut self.tracks {
             if let Some(track_end) = track.get_end(self.time_signature) {
                 if track_end < rounded_end {
@@ -421,30 +474,32 @@ impl Composition {
         Some(())
     }
     pub fn get_duration(&self) -> Duration {
-        let start = self.tracks.iter().filter_map(|t| t.get_start())
-            .min();
-        let end = self.tracks.iter().filter_map(|t| t.get_end(self.time_signature))
+        let start = self.tracks.iter().filter_map(|t| t.get_start()).min();
+        let end = self
+            .tracks
+            .iter()
+            .filter_map(|t| t.get_end(self.time_signature))
             .max();
         match (start, end) {
             (Some(start), Some(end)) => end - start,
-            _ => Duration::zero(self.time_signature)
+            _ => Duration::zero(self.time_signature),
         }
     }
 
     pub fn get_start(&self) -> Option<Duration> {
-        self.tracks.iter()
-            .filter_map(|t| t.get_start())
-            .min()
+        self.tracks.iter().filter_map(|t| t.get_start()).min()
     }
 
     pub fn get_end(&self) -> Option<Duration> {
-        self.tracks.iter()
+        self.tracks
+            .iter()
             .filter_map(|t| t.get_end(self.time_signature))
             .max()
     }
 
     pub fn shift_by(&mut self, offset: Duration, insert_rests: bool) {
-        self.tracks.iter_mut()
+        self.tracks
+            .iter_mut()
             .for_each(|tr| tr.shift_by(offset, insert_rests));
     }
 
@@ -498,7 +553,8 @@ impl FromStr for Instrument {
                 let instrument_enum: HashMap<_, _> = Instrument::str_values()
                     .map(|(i, i_name)| (i_name.to_ascii_lowercase(), i))
                     .collect();
-                instrument_enum.get(s)
+                instrument_enum
+                    .get(s)
                     .map(|i| *i)
                     .ok_or(format!("Unknown instrument: {}", s))
             }
@@ -508,10 +564,12 @@ impl FromStr for Instrument {
 
 #[cfg(test)]
 mod composition_element_tests {
-    use crate::composition::{Composition, Duration, Event, Instrument, Pitch, TimeCompression, Track, TrackId, Volume};
+    use crate::cfg::{MusicPrimitive, MusicString, Performer, Symbol, Terminal};
+    use crate::composition::{
+        Composition, Duration, Event, Instrument, Pitch, TimeCompression, Track, TrackId, Volume,
+    };
     use music_primitives::{Beats, TimeSignature};
     use num::rational::Ratio;
-    use crate::cfg::{MusicPrimitive, MusicString, Performer, Symbol, Terminal};
 
     fn assert_epsilon_close(a: f32, b: f32) {
         if (a - b).abs() < 0.01 {
@@ -565,14 +623,12 @@ mod composition_element_tests {
 
     fn comp_template(events: Vec<Event>) -> Composition {
         Composition {
-            tracks: vec![
-                Track {
-                    identifier: TrackId::Custom(0),
-                    instrument: Instrument::SineWave,
-                    events,
-                    rests: vec![],
-                }
-            ],
+            tracks: vec![Track {
+                identifier: TrackId::Custom(0),
+                instrument: Instrument::SineWave,
+                events,
+                rests: vec![],
+            }],
             time_signature: TimeSignature::common(),
         }
     }
@@ -581,22 +637,18 @@ mod composition_element_tests {
     fn test_compression_1() {
         let ts = TimeSignature::common();
         let compression = TimeCompression(Ratio::new(1, 2)); // 50% compression
-        let mut composition1 = comp_template(vec![
-            Event {
-                start: Duration::measures_with_ts(1, ts),
-                duration: Duration::from_beats_with_ts(Beats::from_integer(2), ts),
-                volume: Volume(100),
-                pitch: Pitch::new(4, 0),
-            }
-        ]);
-        let composition_half = comp_template(vec![
-            Event {
-                start: Duration::measures_with_ts(1, ts),
-                duration: Duration::from_beats_with_ts(Beats::from_integer(1), ts),
-                volume: Volume(100),
-                pitch: Pitch::new(4, 0),
-            }
-        ]);
+        let mut composition1 = comp_template(vec![Event {
+            start: Duration::measures_with_ts(1, ts),
+            duration: Duration::from_beats_with_ts(Beats::from_integer(2), ts),
+            volume: Volume(100),
+            pitch: Pitch::new(4, 0),
+        }]);
+        let composition_half = comp_template(vec![Event {
+            start: Duration::measures_with_ts(1, ts),
+            duration: Duration::from_beats_with_ts(Beats::from_integer(1), ts),
+            volume: Volume(100),
+            pitch: Pitch::new(4, 0),
+        }]);
         composition1.compress(compression);
         assert_eq!(composition1, composition_half);
     }
@@ -605,22 +657,18 @@ mod composition_element_tests {
     fn test_compression_2() {
         let ts = TimeSignature::common();
         let compression = TimeCompression(Ratio::new(-1, 1)); // -100% compression (reverse)
-        let mut composition1 = comp_template(vec![
-            Event {
-                start: Duration::measures_with_ts(1, ts),
-                duration: Duration::from_beats_with_ts(Beats::from_integer(2), ts),
-                volume: Volume(100),
-                pitch: Pitch::new(4, 0),
-            }
-        ]);
-        let composition_reversed = comp_template(vec![
-            Event {
-                start: Duration::measures_with_ts(1, ts),
-                duration: Duration::from_beats_with_ts(Beats::from_integer(2), ts),
-                volume: Volume(100),
-                pitch: Pitch::new(4, 0),
-            }
-        ]);
+        let mut composition1 = comp_template(vec![Event {
+            start: Duration::measures_with_ts(1, ts),
+            duration: Duration::from_beats_with_ts(Beats::from_integer(2), ts),
+            volume: Volume(100),
+            pitch: Pitch::new(4, 0),
+        }]);
+        let composition_reversed = comp_template(vec![Event {
+            start: Duration::measures_with_ts(1, ts),
+            duration: Duration::from_beats_with_ts(Beats::from_integer(2), ts),
+            volume: Volume(100),
+            pitch: Pitch::new(4, 0),
+        }]);
         composition1.compress(compression);
         assert_eq!(composition1, composition_reversed);
     }
@@ -631,31 +679,31 @@ mod composition_element_tests {
         let compression = TimeCompression(Ratio::new(-1, 1)); // -100% compression (reverse)
         let mut composition1 = comp_template(vec![
             Event {
-                start: Duration::measures_and_beats_with_ts(1,  Beats::from_integer(0), ts),
+                start: Duration::measures_and_beats_with_ts(1, Beats::from_integer(0), ts),
                 duration: Duration::from_beats_with_ts(Beats::from_integer(1), ts),
                 volume: Volume(100),
                 pitch: Pitch::new(4, 0),
             },
             Event {
-                start: Duration::measures_and_beats_with_ts(1,  Beats::from_integer(1), ts),
+                start: Duration::measures_and_beats_with_ts(1, Beats::from_integer(1), ts),
                 duration: Duration::from_beats_with_ts(Beats::from_integer(1), ts),
                 volume: Volume(100),
                 pitch: Pitch::new(4, 1),
-            }
+            },
         ]);
         let composition_reversed = comp_template(vec![
             Event {
-                start: Duration::measures_and_beats_with_ts(1,  Beats::from_integer(0), ts),
+                start: Duration::measures_and_beats_with_ts(1, Beats::from_integer(0), ts),
                 duration: Duration::from_beats_with_ts(Beats::from_integer(1), ts),
                 volume: Volume(100),
                 pitch: Pitch::new(4, 1),
             },
             Event {
-                start: Duration::measures_and_beats_with_ts(1,  Beats::from_integer(1), ts),
+                start: Duration::measures_and_beats_with_ts(1, Beats::from_integer(1), ts),
                 duration: Duration::from_beats_with_ts(Beats::from_integer(1), ts),
                 volume: Volume(100),
                 pitch: Pitch::new(4, 0),
-            }
+            },
         ]);
         composition1.compress(compression);
         assert_eq!(composition1, composition_reversed);
@@ -667,31 +715,31 @@ mod composition_element_tests {
         let compression = TimeCompression(Ratio::new(1, 2)); // 50% compression
         let mut composition1 = comp_template(vec![
             Event {
-                start: Duration::measures_and_beats_with_ts(1,  Beats::from_integer(0), ts),
+                start: Duration::measures_and_beats_with_ts(1, Beats::from_integer(0), ts),
                 duration: Duration::from_beats_with_ts(Beats::from_integer(2), ts),
                 volume: Volume(100),
                 pitch: Pitch::new(4, 0),
             },
             Event {
-                start: Duration::measures_and_beats_with_ts(1,  Beats::from_integer(2), ts),
+                start: Duration::measures_and_beats_with_ts(1, Beats::from_integer(2), ts),
                 duration: Duration::from_beats_with_ts(Beats::from_integer(2), ts),
                 volume: Volume(100),
                 pitch: Pitch::new(4, 1),
-            }
+            },
         ]);
         let composition_half = comp_template(vec![
             Event {
-                start: Duration::measures_and_beats_with_ts(1,  Beats::from_integer(0), ts),
+                start: Duration::measures_and_beats_with_ts(1, Beats::from_integer(0), ts),
                 duration: Duration::from_beats_with_ts(Beats::from_integer(1), ts),
                 volume: Volume(100),
                 pitch: Pitch::new(4, 0),
             },
             Event {
-                start: Duration::measures_and_beats_with_ts(1,  Beats::from_integer(1), ts),
+                start: Duration::measures_and_beats_with_ts(1, Beats::from_integer(1), ts),
                 duration: Duration::from_beats_with_ts(Beats::from_integer(1), ts),
                 volume: Volume(100),
                 pitch: Pitch::new(4, 1),
-            }
+            },
         ]);
         composition1.compress(compression);
         assert_eq!(composition1, composition_half);
@@ -700,77 +748,111 @@ mod composition_element_tests {
     #[test]
     fn test_compose_v2_1() {
         let ts = TimeSignature::common();
-        let music_string = MusicString(vec![
-            MusicPrimitive::Simple(Symbol::T(Terminal::CurrentSound {duration: Duration::from_beats_with_ts(Beats::from_integer(2), ts)}),)
-        ]);
-        let composition = music_string.compose_v2(ts, Performer {
-            instrument: Instrument::Piano,
-            volume: Volume(80),
-            pitch: Pitch::middle_c()
-        }).unwrap();
+        let music_string = MusicString(vec![MusicPrimitive::Simple(Symbol::T(
+            Terminal::CurrentSound {
+                duration: Duration::from_beats_with_ts(Beats::from_integer(2), ts),
+            },
+        ))]);
+        let composition = music_string
+            .compose_v2(
+                ts,
+                Performer {
+                    instrument: Instrument::Piano,
+                    volume: Volume(80),
+                    pitch: Pitch::middle_c(),
+                },
+            )
+            .unwrap();
         assert_eq!(composition.tracks.len(), 1);
         let track = &composition.tracks[0];
         assert_eq!(track.instrument, Instrument::Piano);
         assert_eq!(track.events.len(), 1);
         let event = &track.events[0];
-        assert_eq!(event.duration, Duration::from_beats_with_ts(Beats::from_integer(2), ts));
+        assert_eq!(
+            event.duration,
+            Duration::from_beats_with_ts(Beats::from_integer(2), ts)
+        );
 
-        assert_eq!(composition.get_start(), Some(Duration::from_beats_with_ts(Beats::from_integer(0), ts)));
-        assert_eq!(composition.get_end(), Some(Duration::from_beats_with_ts(Beats::from_integer(2), ts)));
+        assert_eq!(
+            composition.get_start(),
+            Some(Duration::from_beats_with_ts(Beats::from_integer(0), ts))
+        );
+        assert_eq!(
+            composition.get_end(),
+            Some(Duration::from_beats_with_ts(Beats::from_integer(2), ts))
+        );
     }
 
     #[test]
     fn test_compose_v2_2() {
         // check that different length branches in a split cause an error
         let ts = TimeSignature::common();
-        let music_string = MusicString(vec![
-            MusicPrimitive::Split {
-                branches: vec![
-                    MusicString(vec![
-                        MusicPrimitive::Simple(Symbol::T(Terminal::CurrentSound {duration: Duration::from_beats_with_ts(Beats::from_integer(2), ts)}),)
-                    ]),
-                    MusicString(vec![
-                        MusicPrimitive::Simple(Symbol::T(Terminal::CurrentSound {duration: Duration::from_beats_with_ts(Beats::from_integer(3), ts)}),)
-                    ]),
-                ]
+        let music_string = MusicString(vec![MusicPrimitive::Split {
+            branches: vec![
+                MusicString(vec![MusicPrimitive::Simple(Symbol::T(
+                    Terminal::CurrentSound {
+                        duration: Duration::from_beats_with_ts(Beats::from_integer(2), ts),
+                    },
+                ))]),
+                MusicString(vec![MusicPrimitive::Simple(Symbol::T(
+                    Terminal::CurrentSound {
+                        duration: Duration::from_beats_with_ts(Beats::from_integer(3), ts),
+                    },
+                ))]),
+            ],
+        }]);
+        let composition = music_string.compose_v2(
+            ts,
+            Performer {
+                instrument: Instrument::Piano,
+                volume: Volume(80),
+                pitch: Pitch::middle_c(),
             },
-        ]);
-        let composition = music_string.compose_v2(ts, Performer {
-            instrument: Instrument::Piano,
-            volume: Volume(80),
-            pitch: Pitch::middle_c()
-        });
+        );
         assert!(composition.is_err());
     }
 
     #[test]
     fn test_compose_v2_3() {
         let ts = TimeSignature::common();
-        let music_string = MusicString(vec![
-            MusicPrimitive::Split {
-                branches: vec![
-                    MusicString(vec![
-                        MusicPrimitive::Simple(Symbol::T(Terminal::CurrentSound {duration: Duration::from_beats_with_ts(Beats::from_integer(2), ts)}),)
-                    ]),
-                    MusicString(vec![
-                        MusicPrimitive::Simple(Symbol::T(Terminal::CurrentSound {duration: Duration::from_beats_with_ts(Beats::from_integer(2), ts)}),)
-                    ]),
-                ]
-            },
-        ]);
-        let composition = music_string.compose_v2(ts, Performer {
-            instrument: Instrument::Piano,
-            volume: Volume(80),
-            pitch: Pitch::middle_c()
-        }).unwrap();
+        let music_string = MusicString(vec![MusicPrimitive::Split {
+            branches: vec![
+                MusicString(vec![MusicPrimitive::Simple(Symbol::T(
+                    Terminal::CurrentSound {
+                        duration: Duration::from_beats_with_ts(Beats::from_integer(2), ts),
+                    },
+                ))]),
+                MusicString(vec![MusicPrimitive::Simple(Symbol::T(
+                    Terminal::CurrentSound {
+                        duration: Duration::from_beats_with_ts(Beats::from_integer(2), ts),
+                    },
+                ))]),
+            ],
+        }]);
+        let composition = music_string
+            .compose_v2(
+                ts,
+                Performer {
+                    instrument: Instrument::Piano,
+                    volume: Volume(80),
+                    pitch: Pitch::middle_c(),
+                },
+            )
+            .unwrap();
 
         assert_eq!(composition.tracks.len(), 2);
         for track in &composition.tracks {
             assert_eq!(track.instrument, Instrument::Piano);
             assert_eq!(track.events.len(), 1);
             let event = &track.events[0];
-            assert_eq!(event.duration, Duration::from_beats_with_ts(Beats::from_integer(2), ts));
-            assert_eq!(event.start, Duration::from_beats_with_ts(Beats::from_integer(0), ts));
+            assert_eq!(
+                event.duration,
+                Duration::from_beats_with_ts(Beats::from_integer(2), ts)
+            );
+            assert_eq!(
+                event.start,
+                Duration::from_beats_with_ts(Beats::from_integer(0), ts)
+            );
         }
     }
 }
