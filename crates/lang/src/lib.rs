@@ -1,5 +1,5 @@
 use std::path::Path;
-use crate::cfg::{ComposeError, Grammar, MusicPrimitive, MusicString, MusicStringRenderConfig, Performer};
+use crate::cfg::{ComposeError, Grammar, MusicPrimitive, MusicString, GrammarDerivationConfig, Performer};
 use crate::composition::Composition;
 use crate::scan::ScanError;
 
@@ -28,7 +28,7 @@ into_custom_error!(RenderError, IoError, std::io::Error);
 into_custom_error!(RenderError, ScanError, ScanError);
 into_custom_error!(RenderError, ComposeError, ComposeError);
 
-pub fn compose_from_grammar(grammar_filename: &str, config: MusicStringRenderConfig) -> Result<Composition, RenderError> {
+pub fn compose_from_grammar(grammar_filename: &str, config: GrammarDerivationConfig) -> Result<Composition, RenderError> {
     let contents = std::fs::read_to_string(grammar_filename)?;
     let grammar = contents.parse::<Grammar>()?;
     let final_string = grammar.produce(&config);

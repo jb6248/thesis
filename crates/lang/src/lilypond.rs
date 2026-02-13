@@ -626,7 +626,7 @@ mod tests {
 
 #[cfg(test)]
 mod render_fun {
-    use crate::cfg::{Grammar, MusicPrimitive, MusicString, MusicStringRenderConfig, Performer};
+    use crate::cfg::{Grammar, MusicPrimitive, MusicString, GrammarDerivationConfig, Performer};
     use crate::compose_from_grammar;
     use crate::lilypond::{LilyPondConfig, call_lilypond_cli, render_to_lilypond};
     use music_primitives::TimeSignature;
@@ -636,11 +636,12 @@ mod render_fun {
         let filename = "26_repeat_split"; // "02_repeat_pattern";
         let composition = compose_from_grammar(
             format!("data/grammar/examples/{}.mt", filename).as_str(),
-            MusicStringRenderConfig {
+            GrammarDerivationConfig {
                 iterations: 3,
                 panic_on_bad_production: true,
-                randomized: true,
+                rng: true,
                 rounded: true,
+                max_depth: 10,
             },
         )
         .unwrap();

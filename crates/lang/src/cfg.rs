@@ -15,7 +15,7 @@ use std::str::FromStr;
 pub struct Grammar {
     pub start: NonTerminal,
     pub productions: Vec<Production>,
-    pub time_signature: TimeSignature
+    pub time_signature: TimeSignature,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -24,18 +24,30 @@ pub struct Production(pub NonTerminal, pub MusicString);
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MusicString(pub Vec<MusicPrimitive>);
 
-
 /// This is like a music string but retains the non-terminals in a tree structure.
 /// The root will always either be a production or a primitive.
 /// Since MusicPrimitives contain MusicStrings (recursive structure), those internal strings
 /// need to be converted into GrammarDerivations upon production.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum GrammarDerivation {
-    Production {
+    /// This is a root of a subtree grammar derivation (or the actual root)
+    Branch {
         nt: NonTerminal,
         content: Vec<GrammarDerivation>,
     },
-    Terminal(MusicPrimitive),
+    /// This is a non-destructive wrapper for a number of subtrees
+    Wrapped {
+        transform: MusicTransform,
+        content: Vec<GrammarDerivation>,
+    },
+    /// This is when there's a split in the music
+    Split {
+        branches: Vec<Vec<GrammarDerivation>>,
+    },
+    /// This is a leaf that hasn't been expanded yet... for whatever reason.
+    NTLeaf(NonTerminal),
+    /// This cannot be expanded any further
+    TLeaf(Terminal),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -111,16 +123,23 @@ pub enum MetaControl {
 }
 
 impl Grammar {
-    pub fn new(start: NonTerminal, productions: Vec<Production>, time_signature: TimeSignature) -> Self {
-        Grammar { start, productions, time_signature }
+    pub fn new(
+        start: NonTerminal,
+        productions: Vec<Production>,
+        time_signature: TimeSignature,
+    ) -> Self {
+        Grammar {
+            start,
+            productions,
+            time_signature,
+        }
     }
 
     pub fn get_production(&self, nt: &NonTerminal) -> Option<&Production> {
         self.productions.iter().find(|p| &p.0 == nt)
     }
 
-    pub fn get_production_random(&self, nt: &NonTerminal) -> Option<&Production> {
-        let mut rng = rand::thread_rng();
+    pub fn get_production_random(&self, nt: &NonTerminal, rng: &mut impl Rng) -> Option<&Production> {
         let productions: Vec<_> = self.productions.iter().filter(|p| &p.0 == nt).collect();
         if productions.is_empty() {
             None
@@ -128,14 +147,12 @@ impl Grammar {
             Some(productions[rng.random_range(0..productions.len())])
         }
     }
-    
-    pub fn produce(&self, config: &MusicStringRenderConfig) -> MusicString {
-        let axiom = MusicString(vec![MusicPrimitive::Simple(Symbol::NT(
-            self.start.clone(),
-        ))]);
+
+    pub fn produce(&self, config: &GrammarDerivationConfig) -> MusicString {
+        let axiom = MusicString(vec![MusicPrimitive::Simple(Symbol::NT(self.start.clone()))]);
         axiom.parallel_rewrite_n(
             self,
-            config.randomized,
+            config.rng,
             config.panic_on_bad_production,
             config.iterations,
         )
@@ -185,12 +202,168 @@ impl Default for Performer {
     }
 }
 
-pub struct MusicStringRenderConfig {
+pub struct GrammarDerivationConfig<Rng> {
     pub iterations: usize,
     pub panic_on_bad_production: bool,
-    pub randomized: bool,
+    pub rng: Option<Rng>,
     /// Rounds out composition to whole measures by padding with rests.
     pub rounded: bool,
+    /// Maximum depth for grammar derivation tree.
+    pub max_depth: usize,
+}
+
+pub struct GrammarDerivationGenerator<'a> {
+    pub config: GrammarDerivationConfig,
+    pub grammar: &'a Grammar,
+}
+
+impl GrammarDerivation {
+    /// Uses an in-order traversal of leaves to convert a GrammarDerivation into a MusicString, which can then be composed.
+    pub fn to_music_string(&self) -> MusicString {
+        match self {
+            GrammarDerivation::Branch { content, .. } => {
+                let mut primitives = vec![];
+                for sub_derivation in content {
+                    primitives.extend(sub_derivation.to_music_string().0);
+                }
+                MusicString(primitives)
+            }
+            GrammarDerivation::Wrapped { transform, content } => {
+                let mut primitives = vec![];
+                for sub_derivation in content {
+                    primitives.extend(sub_derivation.to_music_string().0);
+                }
+                MusicString(vec![MusicPrimitive::Transform {
+                    transform: transform.clone(),
+                    content: MusicString(primitives),
+                }])
+            }
+            GrammarDerivation::Split { branches } => {
+                let new_branches = branches
+                    .iter()
+                    .map(|branch| {
+                        let mut primitives = vec![];
+                        for sub_derivation in branch {
+                            primitives.extend(sub_derivation.to_music_string().0);
+                        }
+                        MusicString(primitives)
+                    })
+                    .collect();
+                MusicString(vec![MusicPrimitive::Split { branches: new_branches }])
+            }
+            GrammarDerivation::NTLeaf(nt) => MusicString(vec![MusicPrimitive::Simple(Symbol::NT(nt.clone()))]),
+            GrammarDerivation::TLeaf(t) => MusicString(vec![MusicPrimitive::Simple(Symbol::T(t.clone()))]),
+        }
+    }
+}
+
+impl<'a> GrammarDerivationGenerator<'a> {
+    pub fn new(config: GrammarDerivationConfig, grammar: &'a Grammar) -> Self {
+        GrammarDerivationGenerator { config, grammar }
+    }
+
+    /// Produces a GrammarDerivation by expanding the grammar's starting non-terminal
+    /// step by step, respecting the max_depth limit.
+    pub fn produce(&self) -> GrammarDerivation {
+        let start_nt = self.grammar.start.clone();
+        let mut derivation = self.expand_nonterminal(&start_nt);
+        for _ in 1..self.config.iterations {
+            self.expand_derivation(&mut derivation);
+        }
+        derivation
+    }
+
+    /// Expands a non-terminal into a GrammarDerivation.
+    /// Returns a Production node containing the expanded content.
+    fn expand_nonterminal(&self, nt: &NonTerminal, rng: &mut impl Rng) -> GrammarDerivation {
+
+        // Get the production for this non-terminal
+        let production = if self.config.rng {
+            self.grammar.get_production_random(nt, rng)
+        } else {
+            self.grammar.get_production(nt)
+        };
+
+        match production {
+            Some(Production(_, music_string)) => GrammarDerivation::Branch {
+                nt: nt.clone(),
+                content: music_string.0.iter().map(|mp| self.make_music_primitive_leaf(mp)).collect(),
+            },
+            None => {
+                if self.config.panic_on_bad_production {
+                    panic!("No production found for non-terminal {:?}", nt);
+                }
+                // Return empty production if no production found
+                GrammarDerivation::NTLeaf(nt.clone())
+            }
+        }
+    }
+
+
+    fn make_music_primitive_leaf(&self, mp: &MusicPrimitive) -> GrammarDerivation {
+        match mp {
+            MusicPrimitive::Simple(Symbol::NT(nt)) => GrammarDerivation::NTLeaf(nt.clone()),
+            MusicPrimitive::Simple(Symbol::T(t)) => GrammarDerivation::TLeaf(t.clone()),
+            MusicPrimitive::Split { branches } => GrammarDerivation::Split {
+                branches: branches
+                    .iter()
+                    .map(|branch| {
+                        branch
+                            .0
+                            .iter()
+                            // these recursive calls don't incur depth because we aren't expanding NTs
+                            .map(|mp| self.make_music_primitive_leaf(mp))
+                            .collect()
+                    })
+                    .collect(),
+            },
+            MusicPrimitive::Repeat { .. } => {
+                panic!("Repeat is deprecated, use Transform instead")
+            }
+            MusicPrimitive::Transform { transform, content } => {
+                GrammarDerivation::Wrapped {
+                    transform: transform.clone(),
+                    content: content.0.iter()
+                        // these recursive calls don't incur depth because we aren't expanding NTs
+                        .map(|mp| self.make_music_primitive_leaf(mp))
+                        .collect(),
+                }
+            }
+        }
+    }
+
+    /// Perform a leveled production.
+    fn expand_derivation(&self, derivation: &mut GrammarDerivation) {
+        match derivation {
+            // this is the only one that increases depth
+            GrammarDerivation::NTLeaf(nt) => {
+                *derivation = self.expand_nonterminal(nt);
+                // do NOT do it recursively; we are just doing 1 iteration of expansion
+            }
+            GrammarDerivation::TLeaf(_terminal) => {
+                // Terminals can't be expanded
+            }
+            // the rest of these should not increase the depth
+            GrammarDerivation::Branch { content, .. } => {
+                // follow it down
+                for sub_derivation in content.iter_mut() {
+                    self.expand_derivation(sub_derivation);
+                }
+            }
+            GrammarDerivation::Wrapped {content, ..} => {
+                for sub_derivation in content.iter_mut() {
+                    self.expand_derivation(sub_derivation);
+                }
+            }
+            GrammarDerivation::Split { branches } => {
+                for branch in branches.iter_mut() {
+                    for sub_derivation in branch.iter_mut() {
+                        self.expand_derivation(sub_derivation);
+                    }
+                }
+            }
+        }
+    }
 }
 
 impl MusicString {
@@ -604,7 +777,9 @@ impl MusicString {
                                     repeated_track.append(&track, time_signature);
                                     // add a rest at the end to pad it to the duration of the whole inner
                                     repeated_track.rests.push(Event {
-                                        start: repeated_track.get_end(time_signature).unwrap_or(Duration::zero(time_signature)),
+                                        start: repeated_track
+                                            .get_end(time_signature)
+                                            .unwrap_or(Duration::zero(time_signature)),
                                         duration: single_duration - track_duration,
                                         volume: Volume(0),
                                         pitch: Pitch::none(),
@@ -612,10 +787,7 @@ impl MusicString {
                                 }
                                 repeated_track.shift_by(offset, true);
                                 // then add it to the tracks
-                                tracks.insert(
-                                    id,
-                                    repeated_track,
-                                );
+                                tracks.insert(id, repeated_track);
                             }
                             add_event(
                                 &mut tracks,
@@ -629,7 +801,11 @@ impl MusicString {
                                 &performer,
                                 true,
                             );
-                            println!("total duration for {num} repeats is {:?}, or {:?} * {num}", single_duration * *num as MusicNat, single_duration);
+                            println!(
+                                "total duration for {num} repeats is {:?}, or {:?} * {num}",
+                                single_duration * *num as MusicNat,
+                                single_duration
+                            );
                             single_duration * *num as MusicNat
                         }
                     }
@@ -641,9 +817,7 @@ impl MusicString {
             offset += duration;
         }
         Ok(Composition {
-            tracks: tracks.into_iter()
-                .map(|(_id, track)| track)
-                .collect(),
+            tracks: tracks.into_iter().map(|(_id, track)| track).collect(),
             time_signature,
         })
     }
@@ -842,4 +1016,73 @@ where
 }
 
 #[cfg(test)]
-mod test {}
+mod test {
+    use super::*;
+    use music_primitives::NoteValue;
+
+    #[test]
+    fn test_grammar_derivation_generator() {
+        // Create a simple grammar: S -> a S | b
+        let ts = TimeSignature::common();
+        let grammar = Grammar::new(
+            NonTerminal::Custom("S".to_string()),
+            vec![
+                Production(
+                    NonTerminal::Custom("S".to_string()),
+                    MusicString(vec![
+                        MusicPrimitive::Simple(Symbol::T(Terminal::AbsoluteSound {
+                            duration: Duration::zero(ts) + NoteValue::new(1, 4),
+                            note: TerminalNote::Note {
+                                pitch: Pitch::middle_c(),
+                            },
+                        })),
+                        MusicPrimitive::Simple(Symbol::NT(NonTerminal::Custom("S".to_string()))),
+                    ]),
+                ),
+                Production(
+                    NonTerminal::Custom("S".to_string()),
+                    MusicString(vec![MusicPrimitive::Simple(Symbol::T(
+                        Terminal::AbsoluteSound {
+                            duration: Duration::zero(ts) + NoteValue::new(1, 4),
+                            note: TerminalNote::Rest,
+                        },
+                    ))]),
+                ),
+            ],
+            ts,
+        );
+
+        let config = GrammarDerivationConfig {
+            iterations: 0,
+            panic_on_bad_production: true,
+            rng: false,
+            rounded: false,
+            max_depth: 3,
+        };
+
+        let generator = GrammarDerivationGenerator::new(config, &grammar);
+        let derivation = generator.produce();
+
+        // Verify that we get a Production node for the start symbol
+        match &derivation {
+            GrammarDerivation::Branch { nt, content } => {
+                assert_eq!(nt.clone(), NonTerminal::Custom("S".to_string()));
+                assert!(!content.is_empty());
+                assert_eq!(content.len(), 2);
+            }
+            _ => panic!("Expected a Production node"),
+        }
+
+        let ms = derivation.to_music_string();
+        // Verify that the music string is valid according to the grammar
+        assert_eq!(ms.0.len(), 2);
+        assert!(matches!(
+            &ms.0[0],
+            MusicPrimitive::Simple(Symbol::T(Terminal::AbsoluteSound { .. }))
+        ));
+        assert!(matches!(
+            &ms.0[1],
+            MusicPrimitive::Simple(Symbol::NT(NonTerminal::Custom(s))) if s == "S"
+        ));
+    }
+}
