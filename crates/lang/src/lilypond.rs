@@ -585,6 +585,7 @@ mod tests {
         let entries = fs::read_dir(examples_dir).expect("Failed to read examples directory");
 
         let mut file_count = 0;
+        let mut rng = rand::rng();
         for entry in entries {
             let entry = entry.expect("Failed to read directory entry");
             let path = entry.path();
@@ -615,7 +616,7 @@ mod tests {
                     grammar.start.clone(),
                 ))]);
 
-                axiom.parallel_rewrite(&grammar, true, true);
+                axiom.parallel_rewrite(&grammar, &mut rng, true);
             }
         }
 
@@ -633,16 +634,17 @@ mod render_fun {
 
     #[test]
     fn render_test_1() {
+        let mut rng = rand::rng();
         let filename = "26_repeat_split"; // "02_repeat_pattern";
         let composition = compose_from_grammar(
             format!("data/grammar/examples/{}.mt", filename).as_str(),
             GrammarDerivationConfig {
                 iterations: 3,
                 panic_on_bad_production: true,
-                rng: true,
                 rounded: true,
                 max_depth: 10,
             },
+            &mut rng,
         )
         .unwrap();
         let lilypond_filename = format!("data/lilypond/examples/{}.ly", filename);

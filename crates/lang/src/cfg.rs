@@ -139,7 +139,11 @@ impl Grammar {
         self.productions.iter().find(|p| &p.0 == nt)
     }
 
-    pub fn get_production_random(&self, nt: &NonTerminal, rng: &mut impl Rng) -> Option<&Production> {
+    pub fn get_production_random(
+        &self,
+        nt: &NonTerminal,
+        rng: &mut impl Rng,
+    ) -> Option<&Production> {
         let productions: Vec<_> = self.productions.iter().filter(|p| &p.0 == nt).collect();
         if productions.is_empty() {
             None
@@ -148,11 +152,11 @@ impl Grammar {
         }
     }
 
-    pub fn produce(&self, config: &GrammarDerivationConfig) -> MusicString {
+    pub fn produce(&self, config: &GrammarDerivationConfig, rng: &mut impl Rng) -> MusicString {
         let axiom = MusicString(vec![MusicPrimitive::Simple(Symbol::NT(self.start.clone()))]);
         axiom.parallel_rewrite_n(
             self,
-            config.rng,
+            rng,
             config.panic_on_bad_production,
             config.iterations,
         )
@@ -202,10 +206,9 @@ impl Default for Performer {
     }
 }
 
-pub struct GrammarDerivationConfig<Rng> {
+pub struct GrammarDerivationConfig {
     pub iterations: usize,
     pub panic_on_bad_production: bool,
-    pub rng: Option<Rng>,
     /// Rounds out composition to whole measures by padding with rests.
     pub rounded: bool,
     /// Maximum depth for grammar derivation tree.
@@ -249,10 +252,16 @@ impl GrammarDerivation {
                         MusicString(primitives)
                     })
                     .collect();
-                MusicString(vec![MusicPrimitive::Split { branches: new_branches }])
+                MusicString(vec![MusicPrimitive::Split {
+                    branches: new_branches,
+                }])
             }
-            GrammarDerivation::NTLeaf(nt) => MusicString(vec![MusicPrimitive::Simple(Symbol::NT(nt.clone()))]),
-            GrammarDerivation::TLeaf(t) => MusicString(vec![MusicPrimitive::Simple(Symbol::T(t.clone()))]),
+            GrammarDerivation::NTLeaf(nt) => {
+                MusicString(vec![MusicPrimitive::Simple(Symbol::NT(nt.clone()))])
+            }
+            GrammarDerivation::TLeaf(t) => {
+                MusicString(vec![MusicPrimitive::Simple(Symbol::T(t.clone()))])
+            }
         }
     }
 }
@@ -264,11 +273,11 @@ impl<'a> GrammarDerivationGenerator<'a> {
 
     /// Produces a GrammarDerivation by expanding the grammar's starting non-terminal
     /// step by step, respecting the max_depth limit.
-    pub fn produce(&self) -> GrammarDerivation {
+    pub fn produce(&self, rng: &mut impl Rng) -> GrammarDerivation {
         let start_nt = self.grammar.start.clone();
-        let mut derivation = self.expand_nonterminal(&start_nt);
+        let mut derivation = self.expand_nonterminal(&start_nt, rng);
         for _ in 1..self.config.iterations {
-            self.expand_derivation(&mut derivation);
+            self.expand_derivation(&mut derivation, rng);
         }
         derivation
     }
@@ -276,18 +285,16 @@ impl<'a> GrammarDerivationGenerator<'a> {
     /// Expands a non-terminal into a GrammarDerivation.
     /// Returns a Production node containing the expanded content.
     fn expand_nonterminal(&self, nt: &NonTerminal, rng: &mut impl Rng) -> GrammarDerivation {
-
-        // Get the production for this non-terminal
-        let production = if self.config.rng {
-            self.grammar.get_production_random(nt, rng)
-        } else {
-            self.grammar.get_production(nt)
-        };
+        let production = self.grammar.get_production_random(nt, rng);
 
         match production {
             Some(Production(_, music_string)) => GrammarDerivation::Branch {
                 nt: nt.clone(),
-                content: music_string.0.iter().map(|mp| self.make_music_primitive_leaf(mp)).collect(),
+                content: music_string
+                    .0
+                    .iter()
+                    .map(|mp| self.make_music_primitive_leaf(mp))
+                    .collect(),
             },
             None => {
                 if self.config.panic_on_bad_production {
@@ -298,7 +305,6 @@ impl<'a> GrammarDerivationGenerator<'a> {
             }
         }
     }
-
 
     fn make_music_primitive_leaf(&self, mp: &MusicPrimitive) -> GrammarDerivation {
         match mp {
@@ -323,7 +329,9 @@ impl<'a> GrammarDerivationGenerator<'a> {
             MusicPrimitive::Transform { transform, content } => {
                 GrammarDerivation::Wrapped {
                     transform: transform.clone(),
-                    content: content.0.iter()
+                    content: content
+                        .0
+                        .iter()
                         // these recursive calls don't incur depth because we aren't expanding NTs
                         .map(|mp| self.make_music_primitive_leaf(mp))
                         .collect(),
@@ -333,11 +341,11 @@ impl<'a> GrammarDerivationGenerator<'a> {
     }
 
     /// Perform a leveled production.
-    fn expand_derivation(&self, derivation: &mut GrammarDerivation) {
+    fn expand_derivation(&self, derivation: &mut GrammarDerivation, rng: &mut impl Rng) {
         match derivation {
             // this is the only one that increases depth
             GrammarDerivation::NTLeaf(nt) => {
-                *derivation = self.expand_nonterminal(nt);
+                *derivation = self.expand_nonterminal(nt, rng);
                 // do NOT do it recursively; we are just doing 1 iteration of expansion
             }
             GrammarDerivation::TLeaf(_terminal) => {
@@ -347,18 +355,18 @@ impl<'a> GrammarDerivationGenerator<'a> {
             GrammarDerivation::Branch { content, .. } => {
                 // follow it down
                 for sub_derivation in content.iter_mut() {
-                    self.expand_derivation(sub_derivation);
+                    self.expand_derivation(sub_derivation, rng);
                 }
             }
-            GrammarDerivation::Wrapped {content, ..} => {
+            GrammarDerivation::Wrapped { content, .. } => {
                 for sub_derivation in content.iter_mut() {
-                    self.expand_derivation(sub_derivation);
+                    self.expand_derivation(sub_derivation, rng);
                 }
             }
             GrammarDerivation::Split { branches } => {
                 for branch in branches.iter_mut() {
                     for sub_derivation in branch.iter_mut() {
-                        self.expand_derivation(sub_derivation);
+                        self.expand_derivation(sub_derivation, rng);
                     }
                 }
             }
@@ -828,7 +836,7 @@ impl MusicString {
     pub fn parallel_rewrite(
         &self,
         grammar: &Grammar,
-        random: bool,
+        rng: &mut impl Rng,
         panic_on_bad_production: bool,
     ) -> Self {
         let mut new_string = vec![];
@@ -836,11 +844,7 @@ impl MusicString {
             match mp {
                 MusicPrimitive::Simple(x) => match x {
                     Symbol::NT(nt) => {
-                        if let Some(Production(nt, ms)) = if random {
-                            grammar.get_production_random(nt)
-                        } else {
-                            grammar.get_production(nt)
-                        } {
+                        if let Some(Production(nt, ms)) = grammar.get_production_random(nt, rng) {
                             new_string.extend(ms.clone().0);
                         } else {
                             if panic_on_bad_production {
@@ -858,7 +862,7 @@ impl MusicString {
                 MusicPrimitive::Split { branches } => {
                     let new_branches = branches
                         .iter()
-                        .map(|ms| ms.parallel_rewrite(grammar, random, panic_on_bad_production))
+                        .map(|ms| ms.parallel_rewrite(grammar, rng, panic_on_bad_production))
                         .collect::<Vec<_>>();
                     new_string.push(MusicPrimitive::Split {
                         branches: new_branches,
@@ -866,7 +870,7 @@ impl MusicString {
                 }
                 MusicPrimitive::Repeat { num, content } => {
                     let new_content =
-                        content.parallel_rewrite(grammar, random, panic_on_bad_production);
+                        content.parallel_rewrite(grammar, rng, panic_on_bad_production);
                     new_string.push(MusicPrimitive::Repeat {
                         num: *num,
                         content: new_content,
@@ -874,7 +878,7 @@ impl MusicString {
                 }
                 MusicPrimitive::Transform { transform, content } => {
                     let new_content =
-                        content.parallel_rewrite(grammar, random, panic_on_bad_production);
+                        content.parallel_rewrite(grammar, rng, panic_on_bad_production);
                     new_string.push(MusicPrimitive::Transform {
                         transform: transform.clone(),
                         content: new_content,
@@ -888,13 +892,13 @@ impl MusicString {
     pub fn parallel_rewrite_n(
         &self,
         grammar: &Grammar,
-        random: bool,
+        rng: &mut impl Rng,
         panic_on_bad_production: bool,
         n: usize,
     ) -> Self {
         let mut new_string = self.clone();
         for _i in 0..n {
-            new_string = new_string.parallel_rewrite(grammar, random, panic_on_bad_production);
+            new_string = new_string.parallel_rewrite(grammar, rng, panic_on_bad_production);
         }
         new_string
     }
@@ -1017,6 +1021,7 @@ where
 
 #[cfg(test)]
 mod test {
+    use rand::rng;
     use super::*;
     use music_primitives::NoteValue;
 
@@ -1055,13 +1060,13 @@ mod test {
         let config = GrammarDerivationConfig {
             iterations: 0,
             panic_on_bad_production: true,
-            rng: false,
             rounded: false,
             max_depth: 3,
         };
 
         let generator = GrammarDerivationGenerator::new(config, &grammar);
-        let derivation = generator.produce();
+        let mut rng = rand::rng();
+        let derivation = generator.produce(&mut rng);
 
         // Verify that we get a Production node for the start symbol
         match &derivation {
