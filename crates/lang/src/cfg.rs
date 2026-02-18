@@ -4,12 +4,13 @@ use crate::scan::Scanner;
 use crate::scan::{GrammarScanner, ScanError, consume};
 use music_primitives::{Duration, MusicNat, Pitch, TimeSignature};
 use num::Zero;
-use rand::Rng;
+use rand::{Rng, RngExt};
 use serde::{Deserialize, Serialize};
 use std::cmp::PartialEq;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::str::FromStr;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Grammar {
@@ -154,12 +155,7 @@ impl Grammar {
 
     pub fn produce(&self, config: &GrammarDerivationConfig, rng: &mut impl Rng) -> MusicString {
         let axiom = MusicString(vec![MusicPrimitive::Simple(Symbol::NT(self.start.clone()))]);
-        axiom.parallel_rewrite_n(
-            self,
-            rng,
-            config.panic_on_bad_production,
-            config.iterations,
-        )
+        axiom.parallel_rewrite_n(self, rng, config.panic_on_bad_production, config.iterations)
     }
 }
 
@@ -215,9 +211,9 @@ pub struct GrammarDerivationConfig {
     pub max_depth: usize,
 }
 
-pub struct GrammarDerivationGenerator<'a> {
+pub struct GrammarDerivationGenerator {
     pub config: GrammarDerivationConfig,
-    pub grammar: &'a Grammar,
+    pub grammar: Arc<Grammar>,
 }
 
 impl GrammarDerivation {
@@ -264,11 +260,140 @@ impl GrammarDerivation {
             }
         }
     }
+    pub fn count_all_nts(&self) -> usize {
+        fn check(_: &NonTerminal) -> bool {
+            true
+        }
+        self.count_nts(&mut check)
+    }
+
+    pub fn count_filtered_nts<F: FnMut(&NonTerminal) -> bool>(&self, mut filter: F) -> usize {
+        self.count_nts(&mut filter)
+    }
+
+    /// Count the number of non-terminals in the tree. This is used for random mutation.
+    fn count_nts<F: FnMut(&NonTerminal) -> bool>(&self, filter: &mut F) -> usize {
+        let mut nt_count = 0;
+        match self {
+            GrammarDerivation::NTLeaf(nt) => {
+                if filter(nt) {
+                    nt_count += 1;
+                }
+            }
+            GrammarDerivation::Branch { content, nt } => {
+                if filter(nt) {
+                    nt_count += 1;
+                }
+                for sub_derivation in content.iter() {
+                    nt_count += sub_derivation.count_nts(filter);
+                }
+            }
+            GrammarDerivation::Wrapped { content, .. } => {
+                for sub_derivation in content.iter() {
+                    nt_count += sub_derivation.count_nts(filter);
+                }
+            }
+            GrammarDerivation::Split { branches } => {
+                for branch in branches.iter() {
+                    for sub_derivation in branch.iter() {
+                        nt_count += sub_derivation.count_nts(filter);
+                    }
+                }
+            }
+            GrammarDerivation::TLeaf(_) => {
+                // Terminals don't count
+            }
+        }
+        nt_count
+    }
+
+    pub fn pick_random_nt_mut<F: FnMut(&NonTerminal) -> bool>(
+        &mut self,
+        rng: &mut impl Rng,
+        filter: Option<F>,
+    ) -> Option<(&mut GrammarDerivation, usize)> {
+        let nt_count = if let Some(f) = filter {
+            self.count_filtered_nts(f)
+        } else {
+            self.count_all_nts()
+        };
+        if nt_count == 0 {
+            return None;
+        }
+        let target = rng.random_range(0..nt_count);
+        let mut current = 0;
+        fn helper<'a>(
+            derivation: &'a mut GrammarDerivation,
+            target: usize,
+            current: &mut usize,
+            depth: usize,
+        ) -> Option<(&'a mut GrammarDerivation, usize)> {
+            if *current > target {
+                return None;
+            }
+            if matches!(derivation, GrammarDerivation::Branch { .. }) && *current == target {
+                return Some((derivation, depth));
+            }
+            match derivation {
+                GrammarDerivation::NTLeaf(_) => {
+                    if *current == target {
+                        return Some((derivation, depth));
+                    }
+                    *current += 1;
+                    None
+                }
+                GrammarDerivation::TLeaf(_) => None,
+                GrammarDerivation::Branch { content, .. } => {
+                    *current += 1;
+                    for sub_derivation in content.iter_mut() {
+                        if let Some(result) = helper(sub_derivation, target, current, depth + 1) {
+                            return Some(result);
+                        }
+                    }
+                    None
+                }
+                GrammarDerivation::Wrapped { content, .. } => {
+                    for sub_derivation in content.iter_mut() {
+                        if let Some(result) = helper(sub_derivation, target, current, depth) {
+                            return Some(result);
+                        }
+                    }
+                    None
+                }
+                GrammarDerivation::Split { branches } => {
+                    for branch in branches.iter_mut() {
+                        for sub_derivation in branch.iter_mut() {
+                            if let Some(result) = helper(sub_derivation, target, current, depth) {
+                                return Some(result);
+                            }
+                        }
+                    }
+                    None
+                }
+            }
+        }
+        helper(self, target, &mut current, 0)
+    }
+
+    pub fn is_nt_root(&self) -> bool {
+        self.get_nt_root().is_some()
+    }
+
+    pub fn get_nt_root(&self) -> Option<&NonTerminal> {
+        match self {
+            GrammarDerivation::Branch { nt, .. } => Some(nt),
+            GrammarDerivation::NTLeaf(nt) => Some(nt),
+            _ => None,
+        }
+    }
 }
 
-impl<'a> GrammarDerivationGenerator<'a> {
-    pub fn new(config: GrammarDerivationConfig, grammar: &'a Grammar) -> Self {
-        GrammarDerivationGenerator { config, grammar }
+impl GrammarDerivationGenerator {
+    pub fn new(config: GrammarDerivationConfig, grammar: &Grammar) -> Self {
+        GrammarDerivationGenerator {
+            config,
+            grammar: Arc::new(grammar.clone()),
+        }
     }
 
     /// Produces a GrammarDerivation by expanding the grammar's starting non-terminal
@@ -370,6 +495,56 @@ impl<'a> GrammarDerivationGenerator<'a> {
                     }
                 }
             }
+        }
+    }
+
+    pub fn expand_derivation_recursive(
+        &self,
+        derivation: &mut GrammarDerivation,
+        rng: &mut impl Rng,
+        depth: usize,
+    ) {
+        if depth > self.config.max_depth {
+            return;
+        }
+        match derivation {
+            // this is the only one that increases depth
+            GrammarDerivation::NTLeaf(nt) => {
+                *derivation = self.expand_nonterminal(nt, rng);
+                // do it recursively to expand the new content as well
+                self.expand_derivation_recursive(derivation, rng, depth + 1);
+            }
+            GrammarDerivation::TLeaf(_terminal) => {
+                // Terminals can't be expanded
+            }
+            // the rest of these should not increase the depth
+            GrammarDerivation::Branch { content, .. } => {
+                // follow it down
+                for sub_derivation in content.iter_mut() {
+                    self.expand_derivation_recursive(sub_derivation, rng, depth);
+                }
+            }
+            GrammarDerivation::Wrapped { content, .. } => {
+                for sub_derivation in content.iter_mut() {
+                    self.expand_derivation_recursive(sub_derivation, rng, depth);
+                }
+            }
+            GrammarDerivation::Split { branches } => {
+                for branch in branches.iter_mut() {
+                    for sub_derivation in branch.iter_mut() {
+                        self.expand_derivation_recursive(sub_derivation, rng, depth);
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn re_expand_random_nt(&self, derivation: &mut GrammarDerivation, rng: &mut impl Rng) {
+        if let Some((target, depth)) =
+            derivation.pick_random_nt_mut(rng, None::<fn(&NonTerminal) -> bool>)
+        {
+            *target = self.expand_nonterminal(target.get_nt_root().unwrap(), rng);
+            self.expand_derivation_recursive(derivation, rng, depth);
         }
     }
 }
@@ -1021,9 +1196,9 @@ where
 
 #[cfg(test)]
 mod test {
-    use rand::rng;
     use super::*;
     use music_primitives::NoteValue;
+    use rand::rng;
 
     #[test]
     fn test_grammar_derivation_generator() {

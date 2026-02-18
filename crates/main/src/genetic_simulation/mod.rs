@@ -6,8 +6,8 @@ use rayon::prelude::*;
 pub trait Genome {
     type Config;
     fn generate(config: &Self::Config, rng: &mut impl Rng) -> Self;
-    fn mutate(&mut self);
-    fn crossover(&self, other: &Self) -> Self;
+    fn mutate(&mut self, config: &Self::Config, rng: &mut impl Rng);
+    fn crossover(&self, other: &Self, rng: &mut impl Rng) -> Self;
     fn fitness(&self) -> f64;
 }
 
@@ -108,7 +108,7 @@ impl<C, G: Genome<Config = C> + Clone + ?Sized + Sync> Simulation<G> {
             let parent2 = sample();
 
             let mut child = if rng.random::<f64>() < self.p_crossover {
-                parent1.crossover(&parent2)
+                parent1.crossover(&parent2, &mut rng)
             } else {
                 if rng.random::<f64>() < 0.5 {
                     parent1.clone()
@@ -118,7 +118,7 @@ impl<C, G: Genome<Config = C> + Clone + ?Sized + Sync> Simulation<G> {
             };
 
             if rng.random::<f64>() < self.p_mutation {
-                child.mutate();
+                child.mutate(&self.config, &mut rng);
             }
 
             let x = rand::random::<f64>();
