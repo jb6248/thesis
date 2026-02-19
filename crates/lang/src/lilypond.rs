@@ -197,14 +197,15 @@ impl LilyPondRenderer {
             // Insert rest for any gap
             if start > current_pos {
                 let gap_duration = start - current_pos;
-                write!(output, "{} ", self.render_rest(gap_duration)).unwrap();
+                write!(output, "{} ", self.render_rest_with_measures(gap_duration, current_pos, time_signature)).unwrap();
+                current_pos = start;
             }
 
             // Render the event
             if is_rest {
-                write!(output, "{} ", self.render_rest(event.duration)).unwrap();
+                write!(output, "{} ", self.render_rest_with_measures(event.duration, current_pos, time_signature)).unwrap();
             } else {
-                write!(output, "{} ", self.render_event(&event)).unwrap();
+                write!(output, "{} ", self.render_event_with_measures(&event, current_pos, time_signature)).unwrap();
             }
 
             current_pos = start + event.duration;
@@ -252,6 +253,90 @@ impl LilyPondRenderer {
             write!(result, "r{} ", self.duration_to_lilypond(dur)).unwrap();
         }
         result.trim().to_string()
+    }
+
+    /// Render an event, splitting it at measure boundaries if necessary
+    fn render_event_with_measures(&self, event: &Event, start_pos: Duration, time_signature: TimeSignature) -> String {
+        use music_primitives::{Beats, MusicNat, NoteValue};
+        use num::rational::Ratio;
+
+        // Calculate measure length in beats
+        let measure_length_beats = Ratio::<MusicNat>::from_integer(time_signature.0 as MusicNat);
+
+        // Convert start_pos note value to beats for this time signature
+        // In time signature n/d, 1 beat = 1/d note value
+        // So note_value / (1/d) = note_value * d = beats
+        let start_beats = start_pos.value.0 * Ratio::from_integer(time_signature.1 as MusicNat);
+        let event_beats = event.duration.value.0 * Ratio::from_integer(time_signature.1 as MusicNat);
+
+        // Find position within current measure (in beats)
+        let beats_into_measure = start_beats % measure_length_beats;
+        let beats_until_next_measure = measure_length_beats - beats_into_measure;
+
+        // If this event fits entirely in the current measure, render normally
+        if event_beats <= beats_until_next_measure {
+            return self.render_event(event);
+        }
+
+        // Otherwise, split at measure boundary
+        let duration_before_boundary = Duration::from_beats_with_ts(beats_until_next_measure, time_signature);
+        let duration_after_boundary = event.duration - duration_before_boundary;
+
+        // Create first part
+        let first_event = Event {
+            start: event.start,
+            duration: duration_before_boundary,
+            volume: event.volume,
+            pitch: event.pitch,
+        };
+
+        // Create second part (recursively handle if it also crosses boundaries)
+        let second_event = Event {
+            start: event.start + duration_before_boundary,
+            duration: duration_after_boundary,
+            volume: event.volume,
+            pitch: event.pitch,
+        };
+
+        // Render both parts with tie
+        let first_part = self.render_event(&first_event);
+        let second_part = self.render_event_with_measures(&second_event, start_pos + duration_before_boundary, time_signature);
+
+        format!("{}~{}", first_part, second_part)
+    }
+
+    /// Render a rest, splitting it at measure boundaries if necessary (no ties)
+    fn render_rest_with_measures(&self, duration: Duration, start_pos: Duration, time_signature: TimeSignature) -> String {
+        use music_primitives::MusicNat;
+        use num::rational::Ratio;
+
+        // Calculate measure length in beats
+        let measure_length_beats = Ratio::<MusicNat>::from_integer(time_signature.0 as MusicNat);
+
+        // Convert durations from note values to beats for this time signature
+        // In time signature n/d, 1 beat = 1/d note value
+        // So note_value / (1/d) = note_value * d = beats
+        let start_beats = start_pos.value.0 * Ratio::from_integer(time_signature.1 as MusicNat);
+        let duration_beats = duration.value.0 * Ratio::from_integer(time_signature.1 as MusicNat);
+
+        // Find position within current measure (in beats)
+        let beats_into_measure = start_beats % measure_length_beats;
+        let beats_until_next_measure = measure_length_beats - beats_into_measure;
+
+        // If this rest fits entirely in the current measure, render normally
+        if duration_beats <= beats_until_next_measure {
+            return self.render_rest(duration);
+        }
+
+        // Otherwise, split at measure boundary
+        let duration_before_boundary = Duration::from_beats_with_ts(beats_until_next_measure, time_signature);
+        let duration_after_boundary = duration - duration_before_boundary;
+
+        // Render both parts WITHOUT tie (rests don't tie)
+        let first_part = self.render_rest(duration_before_boundary);
+        let second_part = self.render_rest_with_measures(duration_after_boundary, start_pos + duration_before_boundary, time_signature);
+
+        format!("{} {}", first_part, second_part)
     }
 
     /// Convert a Pitch to LilyPond notation
@@ -500,6 +585,7 @@ mod tests {
         let entries = fs::read_dir(examples_dir).expect("Failed to read examples directory");
 
         let mut file_count = 0;
+        let mut rng = rand::rng();
         for entry in entries {
             let entry = entry.expect("Failed to read directory entry");
             let path = entry.path();
@@ -530,7 +616,7 @@ mod tests {
                     grammar.start.clone(),
                 ))]);
 
-                axiom.parallel_rewrite(&grammar, true, true);
+                axiom.parallel_rewrite(&grammar, &mut rng, true);
             }
         }
 
@@ -541,27 +627,30 @@ mod tests {
 
 #[cfg(test)]
 mod render_fun {
-    use crate::cfg::{Grammar, MusicPrimitive, MusicString, MusicStringRenderConfig, Performer};
+    use crate::cfg::{Grammar, MusicPrimitive, MusicString, GrammarDerivationConfig, Performer};
     use crate::compose_from_grammar;
     use crate::lilypond::{LilyPondConfig, call_lilypond_cli, render_to_lilypond};
     use music_primitives::TimeSignature;
 
     #[test]
     fn render_test_1() {
+        let mut rng = rand::rng();
+        let filename = "26_repeat_split"; // "02_repeat_pattern";
         let composition = compose_from_grammar(
-            "data/grammar/examples/15_rhythm_variations.mt",
-            MusicStringRenderConfig {
+            format!("data/grammar/examples/{}.mt", filename).as_str(),
+            GrammarDerivationConfig {
                 iterations: 3,
                 panic_on_bad_production: true,
-                randomized: true,
                 rounded: true,
+                max_depth: 10,
             },
+            &mut rng,
         )
         .unwrap();
-        let lilypond_filename = "data/lilypond/examples/15_rhythm_variations.ly";
+        let lilypond_filename = format!("data/lilypond/examples/{}.ly", filename);
         render_to_lilypond(
             composition,
-            lilypond_filename,
+            lilypond_filename.as_str(),
             Some(LilyPondConfig {
                 write_dynamics: false,
                 ..LilyPondConfig::default()
@@ -569,6 +658,6 @@ mod render_fun {
         )
         .unwrap();
 
-        call_lilypond_cli(lilypond_filename, "data/lilypond/output", true).unwrap();
+        call_lilypond_cli(lilypond_filename.as_str(), "data/lilypond/output", true).unwrap();
     }
 }

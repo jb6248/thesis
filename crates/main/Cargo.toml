@@ -5,5 +5,7 @@ edition = "2024"
 
 [dependencies]
 music_primitives = { path = "../music_primitives" }
+music_turtle_lang = { path = "../lang" }
 rand = "0.10.0"
 rayon = "1.11.0"
+num = "0.4.3"
