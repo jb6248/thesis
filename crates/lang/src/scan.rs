@@ -487,6 +487,7 @@ impl Scanner for NoteScanner {
 impl Scanner for NoteValueScanner {
     type Output = NoteValue;
 
+    /// Scan a note value in the form of `<num/denom>` or `<num>`. If it doesn't start with '<', return a default of 1/4.
     fn scan<'a>(&self, input: &'a str) -> Result<(Self::Output, &'a str)> {
         // if it starts with '<', then scan a duration
         let default = NoteValue::new(1, 4); // quarter beat
