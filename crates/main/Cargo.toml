@@ -9,3 +9,5 @@ music_turtle_lang = { path = "../lang" }
 rand = "0.10.0"
 rayon = "1.11.0"
 num = "0.4.3"
+enumkit = "0.0.1"
+lazy_static = "1.5.0"
