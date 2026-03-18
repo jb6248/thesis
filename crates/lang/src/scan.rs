@@ -26,7 +26,7 @@ Symbol :=
   | `.` (`<` NoteValue `>`)? // sound current note (this is a terminal)
   | `*` (`<` NoteValue `>`)? // rest current note
 
-NonTerminal := [-a-zA-Z1-9/#\?]
+NonTerminal := [-a-zA-Z1-9/#\?_]
 
 Terminal :=
   | Note (`<` NoteValue `>`)?
@@ -583,7 +583,7 @@ impl Scanner for NonTerminalScanner {
 
     fn scan<'a>(&self, input: &'a str) -> Result<(Self::Output, &'a str)> {
         // scan [-a-zA-Z0-9/] and return largest prefix
-        let other_allowed_chars: HashSet<char> = "-/#?".chars().collect();
+        let other_allowed_chars: HashSet<char> = "-/#?_".chars().collect();
         let is_nt_char = |c: char| c.is_alphabetic() || c.is_ascii_digit() ||
             other_allowed_chars.contains(&c);
         let mut chars = input.chars();

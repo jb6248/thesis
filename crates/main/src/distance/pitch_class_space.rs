@@ -38,8 +38,7 @@ pub const E: SpaceLevel = SpaceLevel::Chromatic;
 pub const NUM_LEVELS: usize = 5;
 pub const LEVELS: [SpaceLevel; NUM_LEVELS] = [A, B, C, D, E];
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[derive(Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub struct PitchClassSpace {
     /// Highest level starting with pc0, etc.
     pub highest_levels: [SpaceLevel; 12],
@@ -62,7 +61,7 @@ impl Sub for &SpaceLevel {
 }
 
 impl PitchClassSpace {
-    pub fn c_maj() -> Self {
+    pub const fn c_maj() -> Self {
         // Should initialize a pitch class space that looks like this:
         /*
         I/C
@@ -158,7 +157,9 @@ impl PitchClassSpace {
             current_space.rotate_on_level(Chromatic, 7);
             distance += 1;
             if distance > 12 {
-                panic!("Target pitch class space is unreachable.");
+                panic!(
+                    "Target pitch class space is unreachable:\nCurrent:\n{self}\nOther:\n{other}"
+                );
             }
         }
         // going the other direction is just the inverse of this
@@ -176,8 +177,9 @@ impl PitchClassSpace {
         let mut current_pcs = self.clone();
 
         let other_region = other.get_steps_on_level(Diatonic);
-        let regional_dist = if !other_region.contains(&self.get_root())
-            || !other_region.contains(&self.get_fifth())
+        let current_region = current_pcs.get_steps_on_level(Diatonic);
+        let regional_dist = if !current_region.contains(&other.get_root())
+            || !current_region.contains(&other.get_fifth())
         {
             // if the other space is not in the same region, then we need to get to the same region first.
             let (regional_distance, pcs) = self.regional_distance_with_result(other);
@@ -193,7 +195,9 @@ impl PitchClassSpace {
             current_space.rotate_on_level(Diatonic, 4);
             chord_dist += 1;
             if chord_dist > 7 {
-                panic!("Target pitch class space is unreachable.");
+                panic!(
+                    "Target pitch class space is unreachable:\nCurrent:\n{self}\nOther:\n{other}"
+                );
             }
         }
         chord_dist = chord_dist.min(7 - chord_dist);
@@ -231,7 +235,17 @@ impl PitchClassSpace {
 
     pub fn get_non_root_chord_pcs(&self) -> Vec<usize> {
         // The non-root chord pcs are the ones that have the triadic level as their highest level.
-        self.highest_levels.iter().enumerate().filter_map(|(i, &l)| if l >= Triadic && l < Octave { Some(i) } else { None }).collect()
+        self.highest_levels
+            .iter()
+            .enumerate()
+            .filter_map(|(i, &l)| {
+                if l >= Triadic && l < Octave {
+                    Some(i)
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 
     pub fn get_fifth(&self) -> usize {
@@ -281,10 +295,12 @@ pub fn get_regional_offset_from_roman_numeral(roman_numeral: &str) -> Option<usi
     } else {
         if roman_numeral.starts_with("b") {
             // this is a "flat" region
-            get_regional_offset_from_roman_numeral(&roman_numeral[1..]).map(|offset| (offset + 11) % 12)
+            get_regional_offset_from_roman_numeral(&roman_numeral[1..])
+                .map(|offset| (offset + 11) % 12)
         } else if roman_numeral.starts_with("#") {
             // this is a "sharp" region
-            get_regional_offset_from_roman_numeral(&roman_numeral[1..]).map(|offset| (offset + 1) % 12)
+            get_regional_offset_from_roman_numeral(&roman_numeral[1..])
+                .map(|offset| (offset + 1) % 12)
         } else {
             None
         }
@@ -296,13 +312,17 @@ fn is_roman_numeral(c: char) -> bool {
 }
 
 fn is_minor_chord(s: &str) -> bool {
-    s.chars().any(|c| c.is_ascii_lowercase() && is_roman_numeral(c))
+    s.chars()
+        .any(|c| c.is_ascii_lowercase() && is_roman_numeral(c))
 }
 
 /// Returns the pitch class space corresponding to a chord assuming a root of pc0.
 /// This can be moved to the correct region using get_regional_offset_from_roman_numeral()
 /// In addition, it can be suffixed with "_o" to indicate diminished. It can also be suffixed with "_7" to indicate a seventh chord.
-pub fn get_pitch_class_space_from_roman_numeral(chord_diatonic_offset: usize, minor_region: bool) -> Option<PitchClassSpace> {
+pub fn get_pitch_class_space_from_roman_numeral(
+    chord_diatonic_offset: usize,
+    minor_region: bool,
+) -> Option<PitchClassSpace> {
     // we have to determine the diatonic scale of the chord
     // minor region + dominant chord => harmonic minor scale
     // minor region otherwise => natural minor scale
@@ -320,8 +340,6 @@ pub fn get_pitch_class_space_from_roman_numeral(chord_diatonic_offset: usize, mi
     Some(space)
 }
 
-
-
 impl FromStr for PitchClassSpace {
     type Err = String;
 
@@ -332,8 +350,14 @@ impl FromStr for PitchClassSpace {
             // region is explicitly specified: the first part is the chord, second part is the region
             let minor_region = is_minor_chord(parts[1]);
             if let Some(chord_diatonic_offset) = get_roman_numeral_diatonic_offset(parts[0]) {
-                if let Some(regional_chromatic_offset) = get_regional_offset_from_roman_numeral(parts[1]) {
-                    let mut space = get_pitch_class_space_from_roman_numeral(chord_diatonic_offset, minor_region).ok_or_else(|| format!("Invalid Roman numeral: {}", s))?;
+                if let Some(regional_chromatic_offset) =
+                    get_regional_offset_from_roman_numeral(parts[1])
+                {
+                    let mut space = get_pitch_class_space_from_roman_numeral(
+                        chord_diatonic_offset,
+                        minor_region,
+                    )
+                    .ok_or_else(|| format!("Invalid Roman numeral: {}", s))?;
                     space.rotate_on_level(Chromatic, regional_chromatic_offset as isize);
                     Ok(space)
                 } else {
@@ -393,7 +417,6 @@ mod test {
     use crate::distance::pitch_class_space::SpaceLevel::{Chromatic, Diatonic};
     use crate::distance::pitch_class_space::*;
 
-
     #[test]
     fn test_chord_equality() {
         let pcs1: PitchClassSpace = "ii_o/vi".parse().unwrap();
@@ -409,16 +432,16 @@ mod test {
         assert_eq!(pcs1, pcs2);
 
         let pcs1: PitchClassSpace = "iv/vi".parse().unwrap();
-        let pcs2: PitchClassSpace = "ii".parse().unwrap();
+        let pcs2: PitchClassSpace = "ii/I".parse().unwrap();
         assert_eq!(pcs1.to_string(), pcs2.to_string());
         assert_eq!(pcs1, pcs2);
 
         let pcs1: PitchClassSpace = "VI/vi".parse().unwrap();
-        let pcs2: PitchClassSpace = "IV".parse().unwrap();
+        let pcs2: PitchClassSpace = "IV/I".parse().unwrap();
         assert_eq!(pcs1, pcs2);
 
         let pcs1: PitchClassSpace = "VII/vi".parse().unwrap();
-        let pcs2: PitchClassSpace = "V".parse().unwrap();
+        let pcs2: PitchClassSpace = "V/I".parse().unwrap();
         assert_eq!(pcs1, pcs2);
     }
 

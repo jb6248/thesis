@@ -1,4 +1,4 @@
-mod lerdahl;
+pub mod lerdahl;
 
 use music_turtle_lang::cfg::{GrammarDerivation, MusicTransform, NonTerminal};
 use crate::distance::pitch_class_space::PitchClassSpace;
@@ -89,7 +89,9 @@ pub fn extract_chord_from_NT_name(nt_name: &str, prefix: &str) -> Option<PitchCl
 
 #[cfg(test)]
 mod test {
-    use music_turtle_lang::cfg::{GrammarDerivationConfig, GrammarDerivationGenerator};
+    use music_primitives::Pitch;
+    use music_turtle_lang::cfg::{GrammarDerivationConfig, GrammarDerivationGenerator, Performer};
+    use music_turtle_lang::composition::{Instrument, Volume};
     use music_turtle_lang::grammar_from_file;
     use music_turtle_lang::lilypond::{call_lilypond_cli, render_to_lilypond, LilyPondConfig};
     use crate::distance::pitch_class_space::PitchClassSpace;
@@ -98,22 +100,22 @@ mod test {
 
     #[test]
     fn test_generation_with_analysis() {
-        let filename = "chords_only";
+        let experiment_name = "initial";
 
         let config = GrammarDerivationConfig {
-            iterations: 0,
+            iterations: 5,
             panic_on_bad_production: true,
             rounded: false,
-            max_depth: 2,
+            max_depth: 10,
         };
 
         let grammar =
-            grammar_from_file(format!("data/grammar/experimental/{}.mt", filename).as_str())
+            grammar_from_file(format!("data/experiments/{experiment_name}/grammar.mt").as_str())
                 .unwrap();
         let generator = GrammarDerivationGenerator::new(config, &grammar);
         let mut rng = rand::rng();
         let derivation = generator.produce(&mut rng);
-        
+
         let implied_initial = PitchClassSpace::c_maj();
         let chord_progression = extract_chord_structure(&derivation, "#");
         println!("{:?}", chord_progression);
@@ -122,9 +124,16 @@ mod test {
         println!("Max distance from initial: {}", max_dist_from_initial);
         println!("Total interchordal distance: {}", total_interchordal_distance);
 
-        let composition = todo!(); // ??
-            
-        let lilypond_filename = format!("data/lilypond/experimental/{}.ly", filename);
+        let performer = Performer {
+            instrument: Instrument::Piano,
+            volume: Volume(50),
+            pitch: Pitch::middle_c(),
+        };
+        let mut composition = derivation.to_music_string().compose_v2(grammar.time_signature, performer)
+            .unwrap();
+        composition.transpose(24);
+
+        let lilypond_filename = format!("data/experiments/{experiment_name}/render.ly");
         render_to_lilypond(
             composition,
             lilypond_filename.as_str(),
@@ -137,7 +146,7 @@ mod test {
 
         call_lilypond_cli(
             lilypond_filename.as_str(),
-            "data/lilypond/output/experimental",
+            &format!("data/experiments/{experiment_name}"),
             true,
         )
         .unwrap();

@@ -3,5 +3,10 @@ mod distance;
 mod util;
 
 fn main() {
-    println!("Hello, world!");
+    // we are going to run a simulation
+    experiment_1();
+}
+
+fn experiment_1() {
+    
 }

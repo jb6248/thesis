@@ -1,6 +1,6 @@
-use music_primitives::{Pitch, PitchClass};
 use crate::distance::pitch_class_space::PitchClassSpace;
 use crate::distance::pitch_class_space::SpaceLevel::Chromatic;
+use music_primitives::{Pitch, PitchClass};
 
 fn generate_all_chords() -> Vec<String> {
     // It's either a major or minor region
@@ -13,9 +13,9 @@ fn generate_all_chords() -> Vec<String> {
     // i ii_o III iv v VI VII
 
     let major_regions = vec!["I", "II", "III", "IV", "V", "VI", "VII"];
-    let minor_regions = vec!["i", "ii", "iii", "iv", "v", "vi", "vii"];
-
     let major_region_chords = vec!["I", "ii", "iii", "IV", "V", "vi", "vii_o"];
+
+    let minor_regions = vec!["i", "ii", "iii", "iv", "v", "vi", "vii"];
     let minor_region_chords = vec!["i", "ii_o", "III", "iv", "v", "VI", "VII"];
 
     let mut chords = vec![];
@@ -37,9 +37,7 @@ fn generate_all_chords() -> Vec<String> {
 /// duration is the duration that should be assigned to each note in the chord (e.g. "1/2" for half notes).
 /// It should be written as "<1/2>" as in the language, or "" to default to quarter notes.
 fn generate_chord_nts(tone_center: PitchClass, prefix: &str, duration: &str) -> Vec<String> {
-    let note_name = |pitch: Pitch| {
-        format!("{}{}", pitch.letter_name(), pitch.octave())
-    };
+    let note_name = |pitch: Pitch| format!("{}{}", pitch.octave(), pitch.letter_name());
     generate_all_chords()
         .into_iter()
         .map(|chord| {
@@ -49,14 +47,16 @@ fn generate_chord_nts(tone_center: PitchClass, prefix: &str, duration: &str) -> 
             // root should be in octave 2
             // the others should be in octave 3
             let root = Pitch::new(2, pcs.get_root());
-            let others = pcs.get_non_root_chord_pcs()
+            let others = pcs
+                .get_non_root_chord_pcs()
                 .into_iter()
                 .map(|pc| Pitch::new(3, pc))
                 .collect::<Vec<_>>();
             // should look something like this:
             // #I/V = { :g2<1/2> | :d3<1/2> | :b3<1/2> }
             let start = format!("{prefix}{chord} = {{ :{}{} ", note_name(root), duration);
-            let middle = others.into_iter()
+            let middle = others
+                .into_iter()
                 .map(|pitch| format!("| :{}{} ", note_name(pitch), duration))
                 .collect::<String>();
             format!("{}{}}}", start, middle)
@@ -66,12 +66,10 @@ fn generate_chord_nts(tone_center: PitchClass, prefix: &str, duration: &str) -> 
 
 fn generate_harmony_chooser(name: &str, prefix: &str) -> String {
     let chords = generate_all_chords();
-    let mut chooser = format!("{name} = {{ ");
-    for chord in chords {
-        chooser.push_str(&format!("| {prefix}{} ", chord));
-    }
-    chooser.push_str("}");
-    chooser
+    chords.iter()
+        .map(|chord| format!("{name} = {prefix}{chord}"))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 #[cfg(test)]
@@ -80,15 +78,17 @@ mod test {
     use music_primitives::PitchClass;
     use music_turtle_lang::cfg::{GrammarDerivationConfig, GrammarDerivationGenerator};
     use music_turtle_lang::grammar_from_file;
-    use music_turtle_lang::lilypond::{call_lilypond_cli, render_to_lilypond, LilyPondConfig};
+    use music_turtle_lang::lilypond::{LilyPondConfig, call_lilypond_cli, render_to_lilypond};
 
     #[test]
     fn test_generate_chord_nts() {
         let prefix = "#";
-        println!("{}", generate_harmony_chooser("harmony_chooser", prefix));
+        let preamble = generate_harmony_chooser("harmony_chooser", prefix);
         let nts = generate_chord_nts(PitchClass::C, prefix, "<1/2>");
-        for nt in nts {
-            println!("{}", nt);
-        }
+
+        let full_grammar = format!("start harmony_chooser\n{}\n{}", preamble, nts.join("\n"));
+        println!("{}", full_grammar);
+        // test to make sure it can be parsed
+        let grammar = full_grammar.parse::<music_turtle_lang::cfg::Grammar>().unwrap();
     }
 }

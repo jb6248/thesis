@@ -1,4 +1,9 @@
-start harmony_chooser
+start S
+
+S = A A
+A = B B
+B = harmony_chooser
+
 harmony_chooser = #I/I
 harmony_chooser = #ii/I
 harmony_chooser = #iii/I

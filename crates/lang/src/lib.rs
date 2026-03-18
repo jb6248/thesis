@@ -8,7 +8,6 @@ pub mod scan;
 pub mod cfg;
 pub mod composition;
 pub mod lilypond;
-mod util;
 
 macro_rules! into_custom_error(
     ($err_type:ident, $variant:ident, $variant_err_type:ty) => {
