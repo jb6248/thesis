@@ -10,19 +10,26 @@ pub fn extract_chord_structure(
     derivation: &GrammarDerivation,
     chord_prefix: &str,
 ) -> Vec<PitchClassSpace> {
+    let chords = extract_symbolic_chord_structure(derivation, chord_prefix);
+    chords.into_iter()
+        .map(|chord_str| chord_str.parse().expect(&format!("Failed to parse chord from NT name: {}", chord_str)))
+        .collect()
+}
+
+pub fn extract_symbolic_chord_structure(
+    derivation: &GrammarDerivation,
+    chord_prefix: &str,
+) -> Vec<String> {
     let process_derivations = |devs: &[GrammarDerivation]| {
         devs.iter()
-            .flat_map(|dev| extract_chord_structure(dev, chord_prefix))
+            .flat_map(|dev| extract_symbolic_chord_structure(dev, chord_prefix))
             .collect()
     };
     let get_nt_chord = |nt: &NonTerminal| {
         match nt {
             NonTerminal::Custom(name) => {
-                if let Some(chord) = extract_chord_from_NT_name(name, chord_prefix) {
-                    Some(chord)
-                } else {
-                    None
-                }
+                name.strip_prefix(chord_prefix)
+                    .map(|s| s.to_owned())
             }
         }
     };
@@ -30,7 +37,7 @@ pub fn extract_chord_structure(
         GrammarDerivation::Branch { nt, content } => {
             // check the content if it isn't a chord NT
             if let Some(chord) = get_nt_chord(nt) {
-                vec![chord]
+                vec![chord.to_owned()]
             } else {
                 process_derivations(content)
             }
@@ -44,8 +51,7 @@ pub fn extract_chord_structure(
                 MusicTransform::Repeat { num } => {
                     // extract chords from content and repeat them num times
                     let mut chords: Vec<_> = process_derivations(&content);
-                    chords.repeat(*num);
-                    chords
+                    (0..*num).flat_map(|_| chords.iter().cloned()).collect()
                 }
                 MusicTransform::Compression { .. } => {
                     // the same as regular content because we don't care about timing
@@ -71,19 +77,6 @@ pub fn extract_chord_structure(
             }
         }
         GrammarDerivation::TLeaf(_) => vec![]
-    }
-}
-
-/// Looking for NTs with a specified prefix followed by a chord.
-/// Example: prefix="#", NT name="#I/V" -> extract chord "I/V"
-pub fn extract_chord_from_NT_name(nt_name: &str, prefix: &str) -> Option<PitchClassSpace> {
-    if nt_name.starts_with(prefix) {
-        let chord_str = &nt_name[prefix.len()..];
-        // Parse chord_str into a PitchClassSpace
-        // This is a placeholder; the actual parsing logic will depend on your chord notation
-        Some(chord_str.parse().expect(&format!("Failed to parse chord from NT name: {}", chord_str)))
-    } else {
-        None
     }
 }
 

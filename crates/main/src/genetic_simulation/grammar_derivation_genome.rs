@@ -5,15 +5,21 @@ use music_turtle_lang::cfg::{
 use rand::Rng;
 use std::sync::Arc;
 use crate::distance::pitch_class_space::PitchClassSpace;
-use crate::genetic_simulation::analysis::extract_chord_structure;
+use crate::genetic_simulation::analysis::{extract_chord_structure, extract_symbolic_chord_structure};
 use crate::genetic_simulation::analysis::lerdahl::{get_maximum_distance, get_total_interchordal_distances};
 
-const CHORD_PREFIX: &str = "#";
-const INITIAL_CHORD: PitchClassSpace = PitchClassSpace::c_maj();
+pub const CHORD_PREFIX: &str = "#";
+pub const INITIAL_CHORD: PitchClassSpace = PitchClassSpace::c_maj();
 
 #[derive(Debug, Clone)]
-pub struct GrammarDerivationGenome(GrammarDerivation);
+pub struct GrammarDerivationGenome(pub GrammarDerivation);
 
+impl GrammarDerivationGenome {
+    pub fn show_chord_progression(&self) {
+        let chord_progression = extract_symbolic_chord_structure(&self.0, CHORD_PREFIX);
+        println!("{:?}", chord_progression);
+    }
+}
 impl Genome for GrammarDerivationGenome {
     type Config = Arc<GrammarDerivationGenerator>;
 
