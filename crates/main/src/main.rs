@@ -21,7 +21,7 @@ fn experiment_1() {
     const EXPERIMENT_LOCATION: &str = "data/experiments/initial";
     // --- constants ---
     let grammar_file    = &format!("{EXPERIMENT_LOCATION}/grammar.mt");
-    let population_size= 1000;
+    let population_size   = 1000;
     let generations       = 100;
     let p_crossover       = 0.7;
     let p_mutation        = 0.2;
@@ -37,7 +37,7 @@ fn experiment_1() {
         GrammarDerivationConfig {
             iterations,
             panic_on_bad_production: false,
-            rounded: false,
+            rounded: true,
             max_depth,
         },
         &grammar,
