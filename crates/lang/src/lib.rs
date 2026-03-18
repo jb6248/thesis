@@ -8,6 +8,7 @@ pub mod scan;
 pub mod cfg;
 pub mod composition;
 pub mod lilypond;
+mod util;
 
 macro_rules! into_custom_error(
     ($err_type:ident, $variant:ident, $variant_err_type:ty) => {
@@ -38,4 +39,10 @@ pub fn compose_from_grammar(grammar_filename: &str, config: GrammarDerivationCon
         composition.add_rests_to_last_measure();
     }
     Ok(composition)
+}
+
+pub fn grammar_from_file(grammar_filename: &str) -> Result<Grammar, RenderError> {
+    let contents = std::fs::read_to_string(grammar_filename)?;
+    let grammar = contents.parse::<Grammar>()?;
+    Ok(grammar)
 }

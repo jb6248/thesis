@@ -39,6 +39,7 @@ pub const NUM_LEVELS: usize = 5;
 pub const LEVELS: [SpaceLevel; NUM_LEVELS] = [A, B, C, D, E];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Copy)]
 pub struct PitchClassSpace {
     /// Highest level starting with pc0, etc.
     pub highest_levels: [SpaceLevel; 12],
@@ -226,6 +227,11 @@ impl PitchClassSpace {
     pub fn get_root(&self) -> usize {
         // The root is the only pitch class that has the octave as its highest level.
         self.highest_levels.iter().position(|&l| l == A).unwrap()
+    }
+
+    pub fn get_non_root_chord_pcs(&self) -> Vec<usize> {
+        // The non-root chord pcs are the ones that have the triadic level as their highest level.
+        self.highest_levels.iter().enumerate().filter_map(|(i, &l)| if l >= Triadic && l < Octave { Some(i) } else { None }).collect()
     }
 
     pub fn get_fifth(&self) -> usize {

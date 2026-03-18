@@ -660,4 +660,33 @@ mod render_fun {
 
         call_lilypond_cli(lilypond_filename.as_str(), "data/lilypond/output", true).unwrap();
     }
+    
+    #[test]
+    fn render_with_analysis_1() {
+        let mut rng = rand::rng();
+        let filename = "chords_only";
+        let composition = compose_from_grammar(
+            format!("data/grammar/experimental/{}.mt", filename).as_str(),
+            GrammarDerivationConfig {
+                iterations: 3,
+                panic_on_bad_production: true,
+                rounded: true,
+                max_depth: 10,
+            },
+            &mut rng,
+        )
+        .unwrap();
+        let lilypond_filename = format!("data/lilypond/experimental/{}.ly", filename);
+        render_to_lilypond(
+            composition,
+            lilypond_filename.as_str(),
+            Some(LilyPondConfig {
+                write_dynamics: false,
+                ..LilyPondConfig::default()
+            }),
+        )
+        .unwrap();
+
+        call_lilypond_cli(lilypond_filename.as_str(), "data/lilypond/output/experimental", true).unwrap();
+    }
 }

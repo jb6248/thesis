@@ -1197,6 +1197,8 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::lilypond::{LilyPondConfig, call_lilypond_cli, render_to_lilypond};
+    use crate::{compose_from_grammar, grammar_from_file};
     use music_primitives::NoteValue;
     use rand::rng;
 
