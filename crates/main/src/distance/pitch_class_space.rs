@@ -4,6 +4,7 @@ use lazy_static::lazy_static;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::ops::Sub;
+use std::str::FromStr;
 
 /// This defines Ord in terms of reverse alphabetical according to the levels' labels: a, b, c, d, e.
 /// Therefore, Octave > Fifth.
@@ -84,6 +85,24 @@ impl PitchClassSpace {
         b: 0             7
         c: 0     3       7
         d: 0   2 3   5   7 8   a
+        e: 0 1 2 3 4 5 6 7 8 9 a b
+        */
+        Self {
+            highest_levels: [A, E, D, C, E, D, E, B, D, E, D, E],
+        }
+    }
+
+    pub fn c_harmonic_min() -> Self {
+        // Should initialize a pitch class space that looks like this:
+        /*
+        i/C
+        Note: this doesn't really make sense because this is only for dominant chords
+        like V or vii_o
+
+        a: 0
+        b: 0             7
+        c: 0     3       7
+        d: 0   2 3   5   7 8     b
         e: 0 1 2 3 4 5 6 7 8 9 a b
         */
         Self {
@@ -216,6 +235,113 @@ impl PitchClassSpace {
     }
 }
 
+fn get_roman_numeral_chromatic_offset(roman_numeral: &str) -> Option<usize> {
+    if roman_numeral.ends_with("_o") {
+        return get_roman_numeral_chromatic_offset(&roman_numeral[..roman_numeral.len() - 2]);
+    }
+    match roman_numeral {
+        "I" | "i" => Some(0),
+        "II" | "ii" => Some(2),
+        "III" | "iii" => Some(4),
+        "IV" | "iv" => Some(5),
+        "V" | "v" => Some(7),
+        "VI" | "vi" => Some(9),
+        "VII" | "vii" => Some(11),
+        _ => None,
+    }
+}
+
+fn get_roman_numeral_diatonic_offset(roman_numeral: &str) -> Option<usize> {
+    if roman_numeral.ends_with("_o") {
+        return get_roman_numeral_diatonic_offset(&roman_numeral[..roman_numeral.len() - 2]);
+    }
+    match roman_numeral {
+        "I" | "i" => Some(0),
+        "II" | "ii" => Some(1),
+        "III" | "iii" => Some(2),
+        "IV" | "iv" => Some(3),
+        "V" | "v" => Some(4),
+        "VI" | "vi" => Some(5),
+        "VII" | "vii" => Some(6),
+        _ => None,
+    }
+}
+
+/// Returns the chromatic offset of a region given its Roman numeral. For example, "I" should return 0, "II" should return 2, "bIII" should return 3, "#IV" should return 6, etc.
+/// A region name is one of I, i, II, ii, ... VII, vii, and can optionally be prefixed with "b" or "#" to indicate a flat or sharp region, respectively.
+pub fn get_regional_offset_from_roman_numeral(roman_numeral: &str) -> Option<usize> {
+    if let Some(offset) = get_roman_numeral_chromatic_offset(roman_numeral) {
+        Some(offset)
+    } else {
+        if roman_numeral.starts_with("b") {
+            // this is a "flat" region
+            get_regional_offset_from_roman_numeral(&roman_numeral[1..]).map(|offset| (offset + 11) % 12)
+        } else if roman_numeral.starts_with("#") {
+            // this is a "sharp" region
+            get_regional_offset_from_roman_numeral(&roman_numeral[1..]).map(|offset| (offset + 1) % 12)
+        } else {
+            None
+        }
+    }
+}
+
+fn is_roman_numeral(c: char) -> bool {
+    matches!(c.to_ascii_lowercase(), 'i' | 'v')
+}
+
+fn is_minor_chord(s: &str) -> bool {
+    s.chars().any(|c| c.is_ascii_lowercase() && is_roman_numeral(c))
+}
+
+/// Returns the pitch class space corresponding to a chord assuming a root of pc0.
+/// This can be moved to the correct region using get_regional_offset_from_roman_numeral()
+/// In addition, it can be suffixed with "_o" to indicate diminished. It can also be suffixed with "_7" to indicate a seventh chord.
+pub fn get_pitch_class_space_from_roman_numeral(chord_diatonic_offset: usize, minor_region: bool) -> Option<PitchClassSpace> {
+    // we have to determine the diatonic scale of the chord
+    // minor region + dominant chord => harmonic minor scale
+    // minor region otherwise => natural minor scale
+    let is_dominant_chord = chord_diatonic_offset == 4 || chord_diatonic_offset == 6; // V or vii_o
+    let mut space = if minor_region {
+        if is_dominant_chord {
+            PitchClassSpace::c_harmonic_min()
+        } else {
+            PitchClassSpace::c_nat_min()
+        }
+    } else {
+        PitchClassSpace::c_maj()
+    };
+    space.rotate_on_level(Diatonic, chord_diatonic_offset as isize);
+    Some(space)
+}
+
+
+
+impl FromStr for PitchClassSpace {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // if there's a '/', then split on it
+        let parts: Vec<&str> = s.split('/').collect();
+        if parts.len() == 2 {
+            // region is explicitly specified: the first part is the chord, second part is the region
+            let minor_region = is_minor_chord(parts[1]);
+            if let Some(chord_diatonic_offset) = get_roman_numeral_diatonic_offset(parts[0]) {
+                if let Some(regional_chromatic_offset) = get_regional_offset_from_roman_numeral(parts[1]) {
+                    let mut space = get_pitch_class_space_from_roman_numeral(chord_diatonic_offset, minor_region).ok_or_else(|| format!("Invalid Roman numeral: {}", s))?;
+                    space.rotate_on_level(Chromatic, regional_chromatic_offset as isize);
+                    Ok(space)
+                } else {
+                    Err(format!("Invalid region Roman numeral: {}", s))
+                }
+            } else {
+                Err(format!("Invalid chord Roman numeral: {}", s))
+            }
+        } else {
+            Err(format!("Invalid input: {}", s))
+        }
+    }
+}
+
 impl Display for PitchClassSpace {
     /*
     This should display something like this for I/C:
@@ -261,6 +387,65 @@ mod test {
     use crate::distance::pitch_class_space::SpaceLevel::{Chromatic, Diatonic};
     use crate::distance::pitch_class_space::*;
 
+
+    #[test]
+    fn test_chord_equality() {
+        let pcs1: PitchClassSpace = "ii_o/vi".parse().unwrap();
+        let pcs2: PitchClassSpace = "vii_o/I".parse().unwrap();
+        assert_eq!(pcs1, pcs2);
+
+        let pcs1: PitchClassSpace = "I/V".parse().unwrap();
+        let pcs2: PitchClassSpace = "V/I".parse().unwrap();
+        assert_ne!(pcs1, pcs2);
+
+        let pcs1: PitchClassSpace = "III/vi".parse().unwrap();
+        let pcs2: PitchClassSpace = "I/I".parse().unwrap();
+        assert_eq!(pcs1, pcs2);
+
+        let pcs1: PitchClassSpace = "iv/vi".parse().unwrap();
+        let pcs2: PitchClassSpace = "ii".parse().unwrap();
+        assert_eq!(pcs1.to_string(), pcs2.to_string());
+        assert_eq!(pcs1, pcs2);
+
+        let pcs1: PitchClassSpace = "VI/vi".parse().unwrap();
+        let pcs2: PitchClassSpace = "IV".parse().unwrap();
+        assert_eq!(pcs1, pcs2);
+
+        let pcs1: PitchClassSpace = "VII/vi".parse().unwrap();
+        let pcs2: PitchClassSpace = "V".parse().unwrap();
+        assert_eq!(pcs1, pcs2);
+    }
+
+    #[test]
+    fn test_parse_pitch_class_space() {
+        let pcs: PitchClassSpace = "I/I".parse().unwrap();
+        assert_eq!(pcs, PitchClassSpace::c_maj());
+
+        let pcs: PitchClassSpace = "i/i".parse().unwrap();
+        assert_eq!(pcs, PitchClassSpace::c_nat_min());
+
+        let pcs: PitchClassSpace = "V/IV".parse().unwrap();
+        let mut expected = PitchClassSpace::c_maj();
+        expected.rotate_on_level(Chromatic, 5);
+        expected.rotate_on_level(Diatonic, 4);
+        assert_eq!(pcs, expected);
+
+        let pcs: PitchClassSpace = "ii_o/vi".parse().unwrap();
+        let mut expected = PitchClassSpace::c_maj();
+        expected.rotate_on_level(Diatonic, 5);
+        expected.rotate_on_level(Diatonic, 1);
+        assert_eq!(pcs, expected);
+
+        let pcs: PitchClassSpace = "ii/I".parse().unwrap();
+        let mut expected = PitchClassSpace::c_nat_min();
+        expected.rotate_on_level(Chromatic, 2);
+
+        let pcs: PitchClassSpace = "v/v".parse().unwrap();
+        let mut expected = PitchClassSpace::c_harmonic_min();
+        expected.rotate_on_level(Chromatic, 7);
+        expected.rotate_on_level(Diatonic, 4);
+        assert_eq!(pcs, expected);
+    }
     #[test]
     fn test_total_distances() {
         let origin = PitchClassSpace::c_maj();
