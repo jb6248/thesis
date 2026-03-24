@@ -39,3 +39,9 @@ pub fn compose_from_grammar(grammar_filename: &str, config: GrammarDerivationCon
     }
     Ok(composition)
 }
+
+pub fn grammar_from_file(grammar_filename: &str) -> Result<Grammar, RenderError> {
+    let contents = std::fs::read_to_string(grammar_filename)?;
+    let grammar = contents.parse::<Grammar>()?;
+    Ok(grammar)
+}

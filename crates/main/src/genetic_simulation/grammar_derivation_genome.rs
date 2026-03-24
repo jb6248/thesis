@@ -4,10 +4,22 @@ use music_turtle_lang::cfg::{
 };
 use rand::Rng;
 use std::sync::Arc;
+use crate::distance::pitch_class_space::PitchClassSpace;
+use crate::genetic_simulation::analysis::{extract_chord_structure, extract_symbolic_chord_structure};
+use crate::genetic_simulation::analysis::lerdahl::{get_maximum_distance, get_total_interchordal_distances};
+
+pub const CHORD_PREFIX: &str = "#";
+pub const INITIAL_CHORD: PitchClassSpace = PitchClassSpace::c_maj();
 
 #[derive(Debug, Clone)]
-pub struct GrammarDerivationGenome(GrammarDerivation);
+pub struct GrammarDerivationGenome(pub GrammarDerivation);
 
+impl GrammarDerivationGenome {
+    pub fn show_chord_progression(&self) {
+        let chord_progression = extract_symbolic_chord_structure(&self.0, CHORD_PREFIX);
+        println!("{:?}", chord_progression);
+    }
+}
 impl Genome for GrammarDerivationGenome {
     type Config = Arc<GrammarDerivationGenerator>;
 
@@ -47,7 +59,12 @@ impl Genome for GrammarDerivationGenome {
     }
 
     fn fitness(&self) -> f64 {
-        1.0 // todo
+        let chord_progression = extract_chord_structure(&self.0, CHORD_PREFIX);
+        let max_dist = get_maximum_distance(&chord_progression, &INITIAL_CHORD);
+        let horizontal_dist = get_total_interchordal_distances(&chord_progression, &INITIAL_CHORD);
+        
+        // want to maximize max_dist and minimize horizontal_dist, so I'll subtract them for now.
+        max_dist as f64 - horizontal_dist as f64
     }
 }
 #[cfg(test)]
@@ -80,10 +97,10 @@ mod test {
         };
         let generator = GrammarDerivationGenerator {
             config: GrammarDerivationConfig {
-                iterations: 3,
+                iterations: 4,
                 panic_on_bad_production: true,
                 rounded: true,
-                max_depth: 3,
+                max_depth: 4,
             },
             grammar: Arc::new(grammar),
         };

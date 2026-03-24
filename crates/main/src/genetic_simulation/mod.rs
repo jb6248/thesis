@@ -1,4 +1,7 @@
 mod grammar_derivation_genome;
+pub mod analysis;
+
+pub use grammar_derivation_genome::GrammarDerivationGenome;
 
 use rand::{Rng, RngExt};
 use rayon::prelude::*;
