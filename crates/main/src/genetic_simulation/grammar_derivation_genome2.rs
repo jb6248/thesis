@@ -11,25 +11,29 @@ use crate::genetic_simulation::analysis::lerdahl::{get_maximum_distance, get_tot
 pub const CHORD_PREFIX: &str = "#";
 pub const INITIAL_CHORD: PitchClassSpace = PitchClassSpace::c_maj();
 
-#[derive(Debug, Clone)]
-pub struct GrammarDerivationGenome(pub GrammarDerivation);
+pub struct AnalysisParams {
+    pub smooth_weight: f64,
+}
 
-impl GrammarDerivationGenome {
+#[derive(Debug, Clone)]
+pub struct GrammarDerivationGenome2(pub GrammarDerivation);
+
+impl GrammarDerivationGenome2 {
     pub fn show_chord_progression(&self) {
         let chord_progression = extract_symbolic_chord_structure(&self.0, CHORD_PREFIX);
         println!("{:?}", chord_progression);
     }
 }
-impl Genome for GrammarDerivationGenome {
-    type Config = Arc<GrammarDerivationGenerator>;
+impl Genome for GrammarDerivationGenome2 {
+    type Config = Arc<(GrammarDerivationGenerator, AnalysisParams)>;
 
     fn generate(config: &Self::Config, rng: &mut impl Rng) -> Self {
-        let derivation = config.produce(rng);
-        GrammarDerivationGenome(derivation)
+        let derivation = config.0.produce(rng);
+        GrammarDerivationGenome2(derivation)
     }
 
     fn mutate(&mut self, config: &Self::Config, rng: &mut impl Rng) {
-        config.re_expand_random_nt(&mut self.0, rng)
+        config.0.re_expand_random_nt(&mut self.0, rng)
     }
 
     fn crossover(&self, other: &Self, rng: &mut impl Rng) -> Self {
@@ -47,7 +51,7 @@ impl Genome for GrammarDerivationGenome {
                     other.pick_random_nt_mut(rng, Some(check))
                 {
                     std::mem::swap(self_derivation, other_derivation);
-                    return GrammarDerivationGenome(current);
+                    return GrammarDerivationGenome2(current);
                 }
                 // otherwise... choose something else (this seems like it could take a while)
                 // todo: intersect NTs for each and then pick from intersection
@@ -58,55 +62,13 @@ impl Genome for GrammarDerivationGenome {
         }
     }
 
-    fn fitness(&self, _config: &Self::Config) -> f64 {
+    fn fitness(&self, config: &Self::Config) -> f64 {
+        let pms = &config.1;
         let chord_progression = extract_chord_structure(&self.0, CHORD_PREFIX);
-        let max_dist = get_maximum_distance(&chord_progression, &INITIAL_CHORD);
-        let horizontal_dist = get_total_interchordal_distances(&chord_progression, &INITIAL_CHORD);
+        let max_dist = get_maximum_distance(&chord_progression, &INITIAL_CHORD) as f64;
+        let horizontal_dist = get_total_interchordal_distances(&chord_progression, &INITIAL_CHORD) as f64;
         
         // want to maximize max_dist and minimize horizontal_dist, so I'll subtract them for now.
-        max_dist as f64 - horizontal_dist as f64
-    }
-}
-#[cfg(test)]
-mod test {
-    use super::*;
-    use music_primitives::{Duration, Pitch, TimeSignature};
-    use music_turtle_lang::cfg::TerminalNote::Note;
-    use music_turtle_lang::cfg::{
-        Grammar, MusicPrimitive, MusicString, NonTerminal, Performer, Production, Symbol, Terminal,
-    };
-    use num::rational::Ratio;
-
-    #[test]
-    fn test_grammar_derivation_genome() {
-        let ts = TimeSignature::common();
-        let grammar = Grammar {
-            start: NonTerminal::Custom("S".to_string()),
-            time_signature: ts,
-            productions: vec![Production(
-                NonTerminal::Custom("S".to_string()),
-                MusicString(vec![MusicPrimitive::Simple(Symbol::T(
-                    Terminal::AbsoluteSound {
-                        note: Note {
-                            pitch: Pitch::new(4, 0),
-                        },
-                        duration: Duration::from_beats_with_ts(Ratio::from_integer(1), ts),
-                    },
-                ))]),
-            )],
-        };
-        let generator = GrammarDerivationGenerator {
-            config: GrammarDerivationConfig {
-                iterations: 4,
-                panic_on_bad_production: true,
-                rounded: true,
-                max_depth: 4,
-            },
-            grammar: Arc::new(grammar),
-        };
-        let config = Arc::new(generator);
-        let mut rng = rand::rng();
-        let genome = GrammarDerivationGenome::generate(&config, &mut rng);
-        println!("{:?}", genome);
+        max_dist - horizontal_dist * pms.smooth_weight
     }
 }

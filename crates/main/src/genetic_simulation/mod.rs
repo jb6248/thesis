@@ -1,5 +1,6 @@
 mod grammar_derivation_genome;
 pub mod analysis;
+pub mod grammar_derivation_genome2;
 
 pub use grammar_derivation_genome::GrammarDerivationGenome;
 
@@ -11,7 +12,7 @@ pub trait Genome {
     fn generate(config: &Self::Config, rng: &mut impl Rng) -> Self;
     fn mutate(&mut self, config: &Self::Config, rng: &mut impl Rng);
     fn crossover(&self, other: &Self, rng: &mut impl Rng) -> Self;
-    fn fitness(&self) -> f64;
+    fn fitness(&self, config: &Self::Config) -> f64;
 }
 
 pub struct Simulation<G>
@@ -42,7 +43,7 @@ impl<G> SimulationMetrics<G> {
     }
 }
 
-impl<C, G: Genome<Config = C> + Clone + ?Sized + Sync> Simulation<G> {
+impl<C: Sync, G: Genome<Config = C> + Clone + ?Sized + Sync> Simulation<G> {
     pub fn new(
         population_size: usize,
         config: C,
@@ -69,7 +70,7 @@ impl<C, G: Genome<Config = C> + Clone + ?Sized + Sync> Simulation<G> {
             .population
             .par_iter()
             .map(|genome| {
-                let fitness = genome.fitness();
+                let fitness = genome.fitness(&self.config);
                 (genome, fitness)
             })
             .collect();
@@ -138,7 +139,7 @@ impl<C, G: Genome<Config = C> + Clone + ?Sized + Sync> Simulation<G> {
         let mut fitnesses: Vec<(&G, f64)> = self
             .population
             .iter()
-            .map(|genome| (genome, genome.fitness()))
+            .map(|genome| (genome, genome.fitness(&self.config)))
             .collect();
         let best_fitness = fitnesses
             .iter()
