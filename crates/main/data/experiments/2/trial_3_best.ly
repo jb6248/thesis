@@ -6,7 +6,7 @@
       \set Staff.instrumentName = "Piano"
       \time 4/4
       \absolute {
-        fis'2
+        r1 r2 e''2
       }
       \bar "|."
     }
@@ -14,7 +14,7 @@
       \set Staff.instrumentName = "Piano"
       \time 4/4
       \absolute {
-        cis''2
+        r2 e''2
       }
       \bar "|."
     }
@@ -22,7 +22,79 @@
       \set Staff.instrumentName = "Piano"
       \time 4/4
       \absolute {
-        a''2
+        e''2
+      }
+      \bar "|."
+    }
+    \new Staff {
+      \set Staff.instrumentName = "Piano"
+      \time 4/4
+      \absolute {
+        r1 r1 r1 r2 e''2
+      }
+      \bar "|."
+    }
+    \new Staff {
+      \set Staff.instrumentName = "Piano"
+      \time 4/4
+      \absolute {
+        r2 c'2
+      }
+      \bar "|."
+    }
+    \new Staff {
+      \set Staff.instrumentName = "Piano"
+      \time 4/4
+      \absolute {
+        c'2
+      }
+      \bar "|."
+    }
+    \new Staff {
+      \set Staff.instrumentName = "Piano"
+      \time 4/4
+      \absolute {
+        r1 r2 bes'2
+      }
+      \bar "|."
+    }
+    \new Staff {
+      \set Staff.instrumentName = "Piano"
+      \time 4/4
+      \absolute {
+        r1 r2 cis''2
+      }
+      \bar "|."
+    }
+    \new Staff {
+      \set Staff.instrumentName = "Piano"
+      \time 4/4
+      \absolute {
+        g''2
+      }
+      \bar "|."
+    }
+    \new Staff {
+      \set Staff.instrumentName = "Piano"
+      \time 4/4
+      \absolute {
+        r2 g''2
+      }
+      \bar "|."
+    }
+    \new Staff {
+      \set Staff.instrumentName = "Piano"
+      \time 4/4
+      \absolute {
+        r1 r1 r1 r2 cis''2
+      }
+      \bar "|."
+    }
+    \new Staff {
+      \set Staff.instrumentName = "Piano"
+      \time 4/4
+      \absolute {
+        r1 r1 r1 r2 bes'2
       }
       \bar "|."
     }

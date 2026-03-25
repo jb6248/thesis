@@ -1,0 +1,105 @@
+=== Trial 1/5 ===
+  Generation   20: Best Fitness: 20.2000, Average Fitness: 12.4285
+  Generation   40: Best Fitness: 19.6000, Average Fitness: 11.9098
+  Generation   60: Best Fitness: 20.7000, Average Fitness: 11.6552
+  Generation   80: Best Fitness: 18.7000, Average Fitness: 16.3477
+  Generation  100: Best Fitness: 18.8000, Average Fitness: 14.9151
+  Final: Best Fitness: 18.8000, Average Fitness: 14.9151
+  -- Top genome #1 (fitness: 18.8000):
+["vi/VII", "i/iv", "III/ii", "iv/v"]
+  -- Top genome #2 (fitness: 17.6000):
+["iii/VII", "ii/VII", "III/ii", "iv/v"]
+  -- Top genome #3 (fitness: 17.3000):
+["iv/v", "ii/VII", "iv/v", "iv/v"]
+  -- Top genome #4 (fitness: 17.3000):
+["iv/v", "ii/VII", "ii/VII", "iv/v"]
+  -- Top genome #5 (fitness: 17.3000):
+["iv/v", "ii/VII", "iv/v", "iv/v"]
+> "lilypond" "-o" "data/experiments/2/" "data/experiments/2/trial_1_best.ly"
+
+=== Trial 2/5 ===
+  Generation   20: Best Fitness: 21.4000, Average Fitness: 16.3024
+  Generation   40: Best Fitness: 21.0000, Average Fitness: 17.7647
+  Generation   60: Best Fitness: 21.7000, Average Fitness: 20.9191
+  Generation   80: Best Fitness: 21.4000, Average Fitness: 17.4552
+  Generation  100: Best Fitness: 19.3000, Average Fitness: 12.0288
+  Final: Best Fitness: 19.3000, Average Fitness: 12.0288
+  -- Top genome #1 (fitness: 19.3000):
+["iv/v", "iv/v", "iv/v", "V/VII"]
+  -- Top genome #2 (fitness: 18.8000):
+["iv/v", "iv/v", "vi/VI", "V/VII"]
+  -- Top genome #3 (fitness: 18.4000):
+["iv/v", "iv/v", "vi/VI", "ii/VII"]
+  -- Top genome #4 (fitness: 18.3000):
+["iv/v", "iii/VII", "vi/VI", "iv/v"]
+  -- Top genome #5 (fitness: 18.0000):
+["iv/v", "vi/VI", "vi/VII", "iv/v"]
+> "lilypond" "-o" "data/experiments/2/" "data/experiments/2/trial_2_best.ly"
+
+=== Trial 3/5 ===
+  Generation   20: Best Fitness: 20.5000, Average Fitness: 16.3434
+  Generation   40: Best Fitness: 18.8000, Average Fitness: 14.4522
+  Generation   60: Best Fitness: 19.4000, Average Fitness: 14.4317
+  Generation   80: Best Fitness: 19.5000, Average Fitness: 17.0328
+  Generation  100: Best Fitness: 20.0000, Average Fitness: 16.8367
+  Final: Best Fitness: 20.0000, Average Fitness: 16.8367
+  -- Top genome #1 (fitness: 20.0000):
+["V/IV", "V/IV", "vii_o/VII", "vii_o/VII"]
+  -- Top genome #2 (fitness: 20.0000):
+["V/IV", "V/IV", "vii_o/VII", "vii_o/VII"]
+  -- Top genome #3 (fitness: 20.0000):
+["V/IV", "V/IV", "vii_o/VII", "vii_o/VII"]
+  -- Top genome #4 (fitness: 20.0000):
+["V/IV", "V/IV", "vii_o/VII", "vii_o/VII"]
+  -- Top genome #5 (fitness: 20.0000):
+["V/IV", "V/IV", "vii_o/VII", "vii_o/VII"]
+> "lilypond" "-o" "data/experiments/2/" "data/experiments/2/trial_3_best.ly"
+
+=== Trial 4/5 ===
+  Generation   20: Best Fitness: 21.1000, Average Fitness: 16.5160
+  Generation   40: Best Fitness: 18.0000, Average Fitness: 12.5471
+  Generation   60: Best Fitness: 20.9000, Average Fitness: 15.3878
+  Generation   80: Best Fitness: 21.7000, Average Fitness: 21.1848
+  Generation  100: Best Fitness: 20.7000, Average Fitness: 17.0876
+  Final: Best Fitness: 20.7000, Average Fitness: 17.0876
+  -- Top genome #1 (fitness: 20.7000):
+["VI/ii", "iii/VII", "iii/VII", "iii/VII"]
+  -- Top genome #2 (fitness: 20.7000):
+["VI/ii", "iii/VII", "iii/VII", "iii/VII"]
+  -- Top genome #3 (fitness: 19.9000):
+["VI/v", "iii/VII", "VI/v", "VI/ii"]
+  -- Top genome #4 (fitness: 19.9000):
+["VI/v", "iii/VII", "VI/v", "VI/ii"]
+  -- Top genome #5 (fitness: 19.8000):
+["iii/VII", "iii/VII", "VI/v", "VI/ii"]
+> "lilypond" "-o" "data/experiments/2/" "data/experiments/2/trial_4_best.ly"
+
+=== Trial 5/5 ===
+  Generation   20: Best Fitness: 20.5000, Average Fitness: 14.3779
+  Generation   40: Best Fitness: 18.9000, Average Fitness: 15.8975
+  Generation   60: Best Fitness: 19.6000, Average Fitness: 16.2635
+  Generation   80: Best Fitness: 18.5000, Average Fitness: 13.9023
+  Generation  100: Best Fitness: 18.2000, Average Fitness: 14.8433
+  Final: Best Fitness: 18.2000, Average Fitness: 14.8433
+  -- Top genome #1 (fitness: 18.2000):
+["vi/VII", "iv/vi", "iv/vi", "vi/II"]
+  -- Top genome #2 (fitness: 17.7000):
+["iii/III", "iv/vi", "iv/vi", "vi/VII"]
+  -- Top genome #3 (fitness: 17.6000):
+["iii/III", "iv/vi", "iv/vi", "iii/VII"]
+  -- Top genome #4 (fitness: 17.2000):
+["iii/III", "vii_o/VI", "iv/vi", "iv/vi"]
+  -- Top genome #5 (fitness: 17.0000):
+["iv/vi", "iv/vi", "iii/III", "vi/II"]
+> "lilypond" "-o" "data/experiments/2/" "data/experiments/2/trial_5_best.ly"
+
+============================
+Experiment 2 Summary (5 trials)
+============================
+  Best fitness  — mean: 19.4000, std: 0.8786, min: 18.2000, max: 20.7000
+  Average fitness (mean across trials): 15.1423
+  Trial  1: best = 18.8000, avg = 14.9151
+  Trial  2: best = 19.3000, avg = 12.0288
+  Trial  3: best = 20.0000, avg = 16.8367
+  Trial  4: best = 20.7000, avg = 17.0876
+  Trial  5: best = 18.2000, avg = 14.8433

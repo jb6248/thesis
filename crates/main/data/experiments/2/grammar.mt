@@ -1,3 +1,6 @@
+// NOTE: DO NOT CHANGE
+// some tests rely on this which I don't want to fix right now
+
 start S
 
 S = A A

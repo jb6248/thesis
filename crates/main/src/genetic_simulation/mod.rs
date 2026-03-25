@@ -11,7 +11,7 @@ pub trait Genome {
     type Config;
     fn generate(config: &Self::Config, rng: &mut impl Rng) -> Self;
     fn mutate(&mut self, config: &Self::Config, rng: &mut impl Rng);
-    fn crossover(&self, other: &Self, rng: &mut impl Rng) -> Self;
+    fn crossover(&self, other: &Self, config: &Self::Config, rng: &mut impl Rng) -> Self;
     fn fitness(&self, config: &Self::Config) -> f64;
 }
 
@@ -112,7 +112,7 @@ impl<C: Sync, G: Genome<Config = C> + Clone + ?Sized + Sync> Simulation<G> {
             let parent2 = sample();
 
             let mut child = if rng.random::<f64>() < self.p_crossover {
-                parent1.crossover(&parent2, &mut rng)
+                parent1.crossover(&parent2, &self.config, &mut rng)
             } else {
                 if rng.random::<f64>() < 0.5 {
                     parent1.clone()

@@ -32,21 +32,23 @@ impl Genome for GrammarDerivationGenome {
         config.re_expand_random_nt(&mut self.0, rng)
     }
 
-    fn crossover(&self, other: &Self, rng: &mut impl Rng) -> Self {
+    fn crossover(&self, other: &Self, config: &Self::Config, rng: &mut impl Rng) -> Self {
         let mut current = self.0.clone();
         let mut other = other.0.clone();
         loop {
-            if let Some((self_derivation, self_depth)) =
+            if let Some((self_derivation, _self_depth)) =
                 current.pick_random_nt_mut(rng, None::<fn(&NonTerminal) -> bool>)
             {
                 let self_nt_root = self_derivation
                     .get_nt_root()
                     .expect("Dev error: Picked a non-NT root");
                 let check = |dev: &NonTerminal| self_nt_root == dev;
-                if let Some((other_derivation, other_depth)) =
+                if let Some((other_derivation, _other_depth)) =
                     other.pick_random_nt_mut(rng, Some(check))
                 {
                     std::mem::swap(self_derivation, other_derivation);
+                    // Prune to enforce max_depth after the subtree swap.
+                    config.prune(&mut current);
                     return GrammarDerivationGenome(current);
                 }
                 // otherwise... choose something else (this seems like it could take a while)
