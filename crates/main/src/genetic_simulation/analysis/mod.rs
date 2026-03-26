@@ -1,4 +1,5 @@
 pub mod lerdahl;
+pub mod prolongational_tree;
 
 use music_turtle_lang::cfg::{GrammarDerivation, MusicTransform, NonTerminal};
 use crate::distance::pitch_class_space::PitchClassSpace;

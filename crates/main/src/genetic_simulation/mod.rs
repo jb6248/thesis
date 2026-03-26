@@ -1,6 +1,7 @@
 mod grammar_derivation_genome;
 pub mod analysis;
 pub mod grammar_derivation_genome2;
+pub mod grammar_derivation_genome3;
 
 pub use grammar_derivation_genome::GrammarDerivationGenome;
 

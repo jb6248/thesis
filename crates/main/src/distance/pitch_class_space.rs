@@ -707,4 +707,66 @@ mod test {
                                e: 0 1 2 3 4 5 6 7 8 9 a b \n";
         assert_eq!(space.to_string(), expected_string);
     }
+
+    /// Enumerate all distinct pitch class spaces reachable via the grammar:
+    /// diatonic offsets 0..=6, major/minor mode, chromatic transpositions 0..=11.
+    fn all_pitch_class_spaces() -> Vec<PitchClassSpace> {
+        let mut spaces = Vec::new();
+        for diatonic_offset in 0..7usize {
+            for minor_region in [false, true] {
+                if let Some(base) =
+                    get_pitch_class_space_from_roman_numeral(diatonic_offset, minor_region)
+                {
+                    for chromatic_offset in 0..12isize {
+                        let mut s = base.clone();
+                        s.rotate_on_level(Chromatic, chromatic_offset);
+                        spaces.push(s);
+                    }
+                }
+            }
+        }
+        spaces.sort_by_key(|s| s.highest_levels);
+        spaces.dedup();
+        spaces
+    }
+
+    /// Just for fun: find any triple (A, B, C) where d(A,B) + d(B,C) < d(A,C),
+    /// i.e. a violation of the triangle inequality.
+    #[test]
+    fn test_find_triangle_inequality_violation() {
+        let spaces = all_pitch_class_spaces();
+        println!("Checking {} distinct pitch class spaces", spaces.len());
+
+        let mut found = 0;
+        'outer: for a in &spaces {
+            for b in &spaces {
+                let ab = a.total_distance(b);
+                for c in &spaces {
+                    let bc = b.total_distance(c);
+                    let ac = a.total_distance(c);
+                    if ab + bc < ac {
+                        println!(
+                            "Triangle inequality VIOLATED: d(A,B)={} + d(B,C)={} = {} < d(A,C)={}",
+                            ab, bc, ab + bc, ac
+                        );
+                        println!("A:\n{}", a);
+                        println!("B:\n{}", b);
+                        println!("C:\n{}", c);
+                        found += 1;
+                        if found >= 10 {
+                            println!("Found 10 violations, stopping search.");
+                            break 'outer;
+                        }
+                    }
+                }
+            }
+        }
+
+        if found == 0 {
+            println!("No triangle inequality violations found — the distance metric is a semimetric.");
+        } else {
+            println!("Found {} violation(s).", found);
+        }
+        // Not asserting pass/fail — this is exploratory.
+    }
 }
