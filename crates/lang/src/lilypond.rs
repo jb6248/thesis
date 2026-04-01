@@ -460,20 +460,24 @@ impl LilyPondRenderer {
         writeln!(output, "    \\new PianoStaff <<").unwrap();
 
         // --- treble ---
-        writeln!(output, "      \\new Staff {{").unwrap();
-        writeln!(output, "        \\clef treble").unwrap();
-        writeln!(output, "        \\time {}/{}", ts.0, ts.1).unwrap();
-        self.render_staff_voices(output, &treble_tracks, ts, "        ");
-        writeln!(output, "        \\bar \"|.\"").unwrap();
-        writeln!(output, "      }}").unwrap();
+        if !treble_tracks.is_empty() {
+            writeln!(output, "      \\new Staff {{").unwrap();
+            writeln!(output, "        \\clef treble").unwrap();
+            writeln!(output, "        \\time {}/{}", ts.0, ts.1).unwrap();
+            self.render_staff_voices(output, &treble_tracks, ts, "        ");
+            writeln!(output, "        \\bar \"|.\"").unwrap();
+            writeln!(output, "      }}").unwrap();
+        }
 
         // --- bass ---
-        writeln!(output, "      \\new Staff {{").unwrap();
-        writeln!(output, "        \\clef bass").unwrap();
-        writeln!(output, "        \\time {}/{}", ts.0, ts.1).unwrap();
-        self.render_staff_voices(output, &bass_tracks, ts, "        ");
-        writeln!(output, "        \\bar \"|.\"").unwrap();
-        writeln!(output, "      }}").unwrap();
+        if !bass_tracks.is_empty() {
+            writeln!(output, "      \\new Staff {{").unwrap();
+            writeln!(output, "        \\clef bass").unwrap();
+            writeln!(output, "        \\time {}/{}", ts.0, ts.1).unwrap();
+            self.render_staff_voices(output, &bass_tracks, ts, "        ");
+            writeln!(output, "        \\bar \"|.\"").unwrap();
+            writeln!(output, "      }}").unwrap();
+        }
 
         writeln!(output, "    >>").unwrap();
     }
@@ -764,7 +768,7 @@ mod render_fun {
             lilypond_filename.as_str(),
             Some(LilyPondConfig {
                 write_dynamics: false,
-                piano_staff: false,
+                piano_staff: true,
                 ..LilyPondConfig::default()
             }),
         )
