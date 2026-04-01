@@ -12,7 +12,9 @@ use crate::genetic_simulation::analysis::prolongational_tree::find_best_tension_
 pub const CHORD_PREFIX: &str = "#";
 pub const INITIAL_CHORD: PitchClassSpace = PitchClassSpace::c_maj();
 
-pub struct AnalysisParams2 {
+pub struct AnalysisParams4 {
+    /// How much to influence distance of farthest chord in fitness
+    pub(crate) distance_bias: f64
 }
 
 #[derive(Debug, Clone)]
@@ -25,7 +27,7 @@ impl GrammarDerivationGenome4 {
     }
 }
 impl Genome for GrammarDerivationGenome4 {
-    type Config = Arc<(GrammarDerivationGenerator, AnalysisParams2)>;
+    type Config = Arc<(GrammarDerivationGenerator, AnalysisParams4)>;
 
     fn generate(config: &Self::Config, rng: &mut impl Rng) -> Self {
         let derivation = config.0.produce(rng);
@@ -77,6 +79,13 @@ impl Genome for GrammarDerivationGenome4 {
         let ending_tonic_penalty = chord_progression.last()
             .map(|last| INITIAL_CHORD.total_distance(last))
             .unwrap_or(0) as f64;
-        tension_score - ending_tonic_penalty
+        
+        let farthest_chord_dist = chord_progression.iter()
+            .map(|chord| INITIAL_CHORD.total_distance(chord))
+            .max()
+            .unwrap_or(0) as f64;
+        
+        // we like distance, so we'll add it to the tension score
+        tension_score + farthest_chord_dist * pms.distance_bias - ending_tonic_penalty
     }
 }
