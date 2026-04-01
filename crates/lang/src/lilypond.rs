@@ -70,10 +70,10 @@ pub struct LilyPondConfig {
     pub write_dynamics: bool,
     /// Maximum 2^(-n) for note duration denominators (this should be <= 0)
     pub min_neg_power: Option<i32>,
-    /// When true, collapse all voices into a two-staff grand staff (treble + bass)
-    /// as if played on a piano.  Notes at or above middle C (C4, octave 4) go to
-    /// the treble staff; notes below go to the bass staff.  Simultaneous notes on
-    /// the same staff are rendered as a LilyPond chord `<a b c>dur`.
+    /// When true, render all tracks into a two-staff grand staff (treble + bass).
+    /// Each track is assigned to treble or bass clef based on its pitch range:
+    /// if the track's highest pitch is >= C4 (middle C) it goes in treble, otherwise bass.
+    /// Multiple tracks on the same clef are rendered as separate LilyPond voices.
     pub piano_staff: bool,
 }
 
@@ -185,7 +185,7 @@ impl LilyPondRenderer {
         let mut output = String::new();
 
         if !track.validate_contiguous() {
-            panic!("Track must be contiguous to be written! Found gaps or overlaps.");
+            panic!("Track must be contiguous to be written! Found gaps or overlaps. \n{}", track.visualize(100, time_signature, track.get_start().unwrap(), track.get_end(time_signature).unwrap()));
         }
 
         // Combine events and rests, sort by start time
@@ -446,21 +446,16 @@ impl LilyPondRenderer {
     // Piano-staff (grand staff) rendering
     // ------------------------------------------------------------------
 
-    /// Collapse every track into a two-staff grand staff.
-    /// Treble: notes at or above middle C (octave >= 4).
-    /// Bass:   notes strictly below middle C (octave < 4).
+    /// Render all tracks into a two-staff grand staff (treble + bass).
+    /// Each track is assigned to treble or bass based on its pitch range.
+    /// Multiple tracks on the same staff are rendered as separate LilyPond voices.
     fn render_piano_staff(&self, output: &mut String, composition: &Composition) {
         let ts = composition.time_signature;
 
-        // Partition all note events across every track into treble / bass.
-        let (treble, bass): (Vec<&Event>, Vec<&Event>) = composition
+        let (treble_tracks, bass_tracks): (Vec<&Track>, Vec<&Track>) = composition
             .tracks
             .iter()
-            .flat_map(|t| &t.events)
-            .partition(|e| {
-                let (octave, _note) = e.pitch.data();
-                octave >= 4
-            });
+            .partition(|t| self.track_uses_treble_clef(t));
 
         writeln!(output, "    \\new PianoStaff <<").unwrap();
 
@@ -468,10 +463,7 @@ impl LilyPondRenderer {
         writeln!(output, "      \\new Staff {{").unwrap();
         writeln!(output, "        \\clef treble").unwrap();
         writeln!(output, "        \\time {}/{}", ts.0, ts.1).unwrap();
-        writeln!(output, "        \\absolute {{").unwrap();
-        let treble_music = self.render_piano_voice(&treble, ts);
-        writeln!(output, "          {}", treble_music).unwrap();
-        writeln!(output, "        }}").unwrap();
+        self.render_staff_voices(output, &treble_tracks, ts, "        ");
         writeln!(output, "        \\bar \"|.\"").unwrap();
         writeln!(output, "      }}").unwrap();
 
@@ -479,145 +471,76 @@ impl LilyPondRenderer {
         writeln!(output, "      \\new Staff {{").unwrap();
         writeln!(output, "        \\clef bass").unwrap();
         writeln!(output, "        \\time {}/{}", ts.0, ts.1).unwrap();
-        writeln!(output, "        \\absolute {{").unwrap();
-        let bass_music = self.render_piano_voice(&bass, ts);
-        writeln!(output, "          {}", bass_music).unwrap();
-        writeln!(output, "        }}").unwrap();
+        self.render_staff_voices(output, &bass_tracks, ts, "        ");
         writeln!(output, "        \\bar \"|.\"").unwrap();
         writeln!(output, "      }}").unwrap();
 
         writeln!(output, "    >>").unwrap();
     }
 
-    /// Render a flat list of events as a single piano voice.
-    /// Events sharing the same start time are collapsed into a LilyPond chord.
-    /// Gaps between events are filled with rests.
-    /// If the list is empty a whole-measure rest is emitted.
-    fn render_piano_voice(&self, events: &[&Event], time_signature: TimeSignature) -> String {
+    /// Returns true if the track should use treble clef.
+    /// Rule: if the highest pitch in the track is >= C4 (middle C), use treble; else bass.
+    fn track_uses_treble_clef(&self, track: &Track) -> bool {
+        let highest_semitone = track
+            .events
+            .iter()
+            .map(|e| {
+                let (oct, note) = e.pitch.data();
+                oct as i32 * 12 + note as i32
+            })
+            .max();
+
+        match highest_semitone {
+            None => true, // empty track → treble by default
+            Some(s) => s >= 4 * 12, // C4 semitone value = 48
+        }
+    }
+
+    /// Render a list of tracks as voices within a single staff.
+    /// With one track, renders it directly. With multiple tracks, wraps each
+    /// in a `\new Voice` block with `\voiceOne`, `\voiceTwo`, etc.
+    /// With no tracks, emits a full-measure rest.
+    fn render_staff_voices(
+        &self,
+        output: &mut String,
+        tracks: &[&Track],
+        time_signature: TimeSignature,
+        indent: &str,
+    ) {
         use music_primitives::MusicNat;
         use num::rational::Ratio;
 
-        if events.is_empty() {
-            // Emit one full measure of rest so LilyPond has valid content.
+        if tracks.is_empty() {
             let measure_beats = Ratio::<MusicNat>::from_integer(time_signature.0 as MusicNat);
             let rest_dur = Duration::from_beats_with_ts(measure_beats, time_signature);
-            return self.render_rest(rest_dur);
+            writeln!(output, "{}{}", indent, self.render_rest(rest_dur)).unwrap();
+            return;
         }
 
-        // Sort events by start time.
-        let mut sorted: Vec<&Event> = events.to_vec();
-        sorted.sort_by_key(|e| e.start);
-
-        let mut output = String::new();
-        let mut current_pos = Duration::zero(time_signature);
-        let mut i = 0;
-
-        while i < sorted.len() {
-            let group_start = sorted[i].start;
-
-            // Fill any gap before this group with rests.
-            if group_start > current_pos {
-                let gap = group_start - current_pos;
-                write!(
-                    output, "{} ",
-                    self.render_rest_with_measures(gap, current_pos, time_signature)
-                ).unwrap();
-                current_pos = group_start;
+        if tracks.len() == 1 {
+            writeln!(output, "{}\\absolute {{", indent).unwrap();
+            let music = self.render_track_music(tracks[0], time_signature);
+            writeln!(output, "{}  {}", indent, music).unwrap();
+            writeln!(output, "{}}}", indent).unwrap();
+        } else {
+            writeln!(output, "{}<<", indent).unwrap();
+            for (i, track) in tracks.iter().enumerate() {
+                let voice_cmd = match i % 4 {
+                    0 => "\\voiceOne",
+                    1 => "\\voiceTwo",
+                    2 => "\\voiceThree",
+                    _ => "\\voiceFour",
+                };
+                writeln!(output, "{}  \\new Voice {{", indent).unwrap();
+                writeln!(output, "{}    {}", indent, voice_cmd).unwrap();
+                writeln!(output, "{}    \\absolute {{", indent).unwrap();
+                let music = self.render_track_music(track, time_signature);
+                writeln!(output, "{}      {}", indent, music).unwrap();
+                writeln!(output, "{}    }}", indent).unwrap();
+                writeln!(output, "{}  }}", indent).unwrap();
             }
-
-            // Collect all events that share this start time into one group.
-            let group_len = sorted[i..]
-                .iter()
-                .take_while(|e| e.start == group_start)
-                .count();
-            let group = &sorted[i..i + group_len];
-
-            // All notes in a grammar chord have the same duration; use the first.
-            let duration = group[0].duration;
-            let volume   = group[0].volume;
-
-            let note_str = if group.len() == 1 {
-                // Single note — reuse the existing measure-aware path.
-                self.render_event_with_measures(group[0], current_pos, time_signature)
-            } else {
-                // Multiple simultaneous notes — render as a LilyPond chord.
-                let pitches: Vec<Pitch> = group.iter().map(|e| e.pitch).collect();
-                self.render_chord_with_measures(&pitches, duration, volume, current_pos, time_signature)
-            };
-
-            write!(output, "{} ", note_str).unwrap();
-            current_pos = group_start + duration;
-            i += group_len;
+            writeln!(output, "{}>>", indent).unwrap();
         }
-
-        output.trim().to_string()
-    }
-
-    /// Render a chord `<p1 p2 …>dur`, applying binary expansion for ties and
-    /// splitting at measure boundaries the same way `render_event_with_measures` does.
-    fn render_chord_with_measures(
-        &self,
-        pitches: &[Pitch],
-        duration: Duration,
-        volume: Volume,
-        start_pos: Duration,
-        time_signature: TimeSignature,
-    ) -> String {
-        use music_primitives::MusicNat;
-        use num::rational::Ratio;
-
-        let measure_length_beats =
-            Ratio::<MusicNat>::from_integer(time_signature.0 as MusicNat);
-        let start_beats =
-            start_pos.value.0 * Ratio::from_integer(time_signature.1 as MusicNat);
-        let duration_beats =
-            duration.value.0 * Ratio::from_integer(time_signature.1 as MusicNat);
-        let beats_into_measure      = start_beats % measure_length_beats;
-        let beats_until_next_measure = measure_length_beats - beats_into_measure;
-
-        if duration_beats <= beats_until_next_measure {
-            return self.render_chord(pitches, duration, volume);
-        }
-
-        // Split at the measure boundary and tie.
-        let dur_before = Duration::from_beats_with_ts(beats_until_next_measure, time_signature);
-        let dur_after  = duration - dur_before;
-
-        let first  = self.render_chord(pitches, dur_before, volume);
-        let second = self.render_chord_with_measures(
-            pitches, dur_after, volume, start_pos + dur_before, time_signature,
-        );
-        format!("{}~{}", first, second)
-    }
-
-    /// Render a LilyPond chord literal `<p1 p2 …>dur` for the given pitches and
-    /// duration, applying binary expansion (ties) as needed.
-    fn render_chord(&self, pitches: &[Pitch], duration: Duration, volume: Volume) -> String {
-        // Sort pitch strings low-to-high for readable output.
-        let mut pitch_strs: Vec<String> = pitches
-            .iter()
-            .map(|p| self.pitch_to_lilypond(*p))
-            .collect();
-        pitch_strs.sort();
-        let chord_body = pitch_strs.join(" ");
-
-        let expanded = duration.binary_expand(self.config.min_neg_power);
-        let mut result = String::new();
-        for (i, dur) in expanded.into_iter().enumerate() {
-            if i > 0 {
-                result.push('~');
-            }
-            let dyn_str = if self.config.write_dynamics && i == 0 {
-                self.volume_to_lilypond_dynamics(volume)
-            } else {
-                String::new()
-            };
-            write!(
-                result, "<{}>{}{}",
-                chord_body, self.duration_to_lilypond(dur), dyn_str
-            ).unwrap();
-        }
-        result
     }
 
     /// Convert volume to LilyPond dynamics markings
@@ -823,7 +746,7 @@ mod render_fun {
     #[test]
     fn render_test_1() {
         let mut rng = rand::rng();
-        let filename = "26_repeat_split"; // "02_repeat_pattern";
+        let filename = "24_drone_melody"; // "02_repeat_pattern";
         let composition = compose_from_grammar(
             format!("data/grammar/examples/{}.mt", filename).as_str(),
             GrammarDerivationConfig {
@@ -841,6 +764,7 @@ mod render_fun {
             lilypond_filename.as_str(),
             Some(LilyPondConfig {
                 write_dynamics: false,
+                piano_staff: false,
                 ..LilyPondConfig::default()
             }),
         )

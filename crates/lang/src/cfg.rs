@@ -819,7 +819,21 @@ impl MusicString {
             // max id in tracks + 1
             tracks.iter().map(|(k, _track)| *k).max().unwrap_or(0) + 1
         }
-
+        fn create_if_not_existing(
+            tracks: &mut HashMap<usize, Track>,
+            track_id: usize,
+            performer: Performer,
+        ) {
+            if !tracks.contains_key(&track_id) {
+                let new_track = Track {
+                    identifier: TrackId::Instrument(performer.instrument),
+                    instrument: performer.instrument,
+                    events: vec![],
+                    rests: vec![],
+                };
+                tracks.insert(track_id, new_track);
+            }
+        }
         fn add_event(
             tracks: &mut HashMap<usize, Track>,
             track_id: usize,
@@ -1004,6 +1018,8 @@ impl MusicString {
                             let single_duration = inner.get_duration();
 
                             // for each track in the inner track, repeat it num times
+                            // note that these will all be the same length
+                            let mut is_first_track = true;
                             for track in inner.tracks {
                                 let id = get_next_track_id(&tracks);
                                 let mut repeated_track = Track {
@@ -1012,35 +1028,39 @@ impl MusicString {
                                     rests: vec![],
                                     instrument: track.instrument,
                                 };
-                                let track_duration = track.get_duration(time_signature);
                                 for _ in 0..*num {
                                     repeated_track.append(&track, time_signature);
-                                    // add a rest at the end to pad it to the duration of the whole inner
-                                    repeated_track.rests.push(Event {
-                                        start: repeated_track
-                                            .get_end(time_signature)
-                                            .unwrap_or(Duration::zero(time_signature)),
-                                        duration: single_duration - track_duration,
-                                        volume: Volume(0),
-                                        pitch: Pitch::none(),
-                                    });
                                 }
-                                repeated_track.shift_by(offset, true);
-                                // then add it to the tracks
-                                tracks.insert(id, repeated_track);
+                                if is_first_track {
+                                    // add it to the current track
+                                    create_if_not_existing(&mut tracks, current_track_id, performer.clone());
+                                    if let Some(current_track) = tracks.get_mut(&current_track_id) {
+                                        current_track.append(&repeated_track, time_signature);
+                                        offset += repeated_track.get_duration(time_signature);
+                                    } else {
+                                        repeated_track.shift_by(offset, true);
+                                        tracks.insert(current_track_id, repeated_track);
+                                    }
+                                } else {
+                                    repeated_track.shift_by(offset, true);
+                                    tracks.insert(current_track_id, repeated_track);
+                                }
+                                is_first_track = false;
                             }
-                            add_event(
-                                &mut tracks,
-                                current_track_id,
-                                Event {
-                                    start: offset,
-                                    duration: single_duration * *num as MusicNat,
-                                    volume: performer.volume,
-                                    pitch: performer.pitch,
-                                },
-                                &performer,
-                                true,
-                            );
+                            if tracks.is_empty() {
+                                add_event(
+                                    &mut tracks,
+                                    current_track_id,
+                                    Event {
+                                        start: offset,
+                                        duration: single_duration * *num as MusicNat,
+                                        volume: performer.volume,
+                                        pitch: performer.pitch,
+                                    },
+                                    &performer,
+                                    true,
+                                );
+                            }
                             println!(
                                 "total duration for {num} repeats is {:?}, or {:?} * {num}",
                                 single_duration * *num as MusicNat,

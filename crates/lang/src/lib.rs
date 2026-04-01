@@ -34,6 +34,11 @@ pub fn compose_from_grammar(grammar_filename: &str, config: GrammarDerivationCon
     let grammar = contents.parse::<Grammar>()?;
     let final_string = grammar.produce(&config, rng);
     let mut composition = final_string.compose_v2(grammar.time_signature, Performer::default())?;
+    for track in composition.tracks.iter() {
+        if !track.validate_contiguous() {
+            return Err(RenderError::ComposeError(ComposeError::MismatchedLengths("Non-contiguous track!".to_string())));
+        }
+    }
     if config.rounded {
         composition.add_rests_to_last_measure();
     }
