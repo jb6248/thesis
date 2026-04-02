@@ -184,44 +184,116 @@ impl LilyPondRenderer {
     fn render_track_music(&self, track: &Track, time_signature: TimeSignature) -> String {
         let mut output = String::new();
 
-        if !track.validate_contiguous() {
-            panic!("Track must be contiguous to be written! Found gaps or overlaps. \n{}", track.visualize(100, time_signature, track.get_start().unwrap(), track.get_end(time_signature).unwrap()));
+        // Group events that share the same start time into chord slots.
+        // After try_merge all events in a slot have the same duration by construction.
+        let mut chord_slots: std::collections::BTreeMap<Duration, Vec<Event>> =
+            std::collections::BTreeMap::new();
+        for event in &track.events {
+            chord_slots.entry(event.start).or_default().push(*event);
         }
 
-        // Combine events and rests, sort by start time
-        let mut all_events: Vec<(Duration, bool, Event)> = Vec::new();
-
-        for event in &track.events {
-            all_events.push((event.start, false, *event));
+        // Build a combined timeline of chord slots and rests, sorted by start time.
+        // Each item is (start, is_rest, events_in_slot).
+        let mut timeline: Vec<(Duration, bool, Vec<Event>)> = Vec::new();
+        for (start, events) in chord_slots {
+            timeline.push((start, false, events));
         }
         for rest in &track.rests {
-            all_events.push((rest.start, true, *rest));
+            timeline.push((rest.start, true, vec![*rest]));
         }
+        timeline.sort_by_key(|(start, _, _)| *start);
 
-        all_events.sort_by_key(|(start, _, _)| *start);
-
-        // Track current position to insert rests for gaps
         let mut current_pos = Duration::zero(time_signature);
 
-        for (start, is_rest, event) in all_events {
-            // Insert rest for any gap
+        for (start, is_rest, events) in timeline {
+            // Fill any gap before this slot with a rest.
             if start > current_pos {
-                let gap_duration = start - current_pos;
-                write!(output, "{} ", self.render_rest_with_measures(gap_duration, current_pos, time_signature)).unwrap();
+                let gap = start - current_pos;
+                write!(output, "{} ", self.render_rest_with_measures(gap, current_pos, time_signature)).unwrap();
                 current_pos = start;
             }
 
-            // Render the event
             if is_rest {
-                write!(output, "{} ", self.render_rest_with_measures(event.duration, current_pos, time_signature)).unwrap();
+                let rest = events[0];
+                write!(output, "{} ", self.render_rest_with_measures(rest.duration, current_pos, time_signature)).unwrap();
+                current_pos = start + rest.duration;
             } else {
-                write!(output, "{} ", self.render_event_with_measures(&event, current_pos, time_signature)).unwrap();
+                let slot_duration = events[0].duration;
+                write!(output, "{} ", self.render_chord_with_measures(&events, current_pos, time_signature)).unwrap();
+                current_pos = start + slot_duration;
             }
-
-            current_pos = start + event.duration;
         }
 
         output.trim().to_string()
+    }
+
+    /// Render a chord (one or more simultaneous events sharing `start` and `duration`).
+    /// A single-event chord renders as a plain note. Multiple events render as `<p1 p2 ...>dur`.
+    /// Non-power-of-2 durations are handled via binary expansion with ties.
+    fn render_chord(&self, events: &[Event]) -> String {
+        assert!(!events.is_empty());
+        if events.len() == 1 {
+            return self.render_event(&events[0]);
+        }
+        let duration = events[0].duration;
+        if !duration.binary_expandable() {
+            panic!("Chord duration {:?} is not binary expandable for LilyPond rendering!", duration);
+        }
+        let pitches: Vec<String> = events.iter().map(|e| self.pitch_to_lilypond(e.pitch)).collect();
+        let pitch_cluster = format!("<{}>", pitches.join(" "));
+        let expanded = duration.binary_expand(self.config.min_neg_power);
+        let mut result = String::new();
+        for (i, dur) in expanded.into_iter().enumerate() {
+            if i > 0 {
+                result.push('~');
+            }
+            write!(
+                result,
+                "{}{}{}",
+                pitch_cluster,
+                self.duration_to_lilypond(dur),
+                if self.config.write_dynamics && i == 0 {
+                    self.volume_to_lilypond_dynamics(events[0].volume)
+                } else {
+                    String::new()
+                }
+            ).unwrap();
+        }
+        result.trim().to_string()
+    }
+
+    /// Like `render_event_with_measures` but for a chord slot (slice of simultaneous events).
+    fn render_chord_with_measures(&self, events: &[Event], start_pos: Duration, time_signature: TimeSignature) -> String {
+        use music_primitives::MusicNat;
+        use num::rational::Ratio;
+
+        if events.len() == 1 {
+            return self.render_event_with_measures(&events[0], start_pos, time_signature);
+        }
+
+        let measure_length_beats = Ratio::<MusicNat>::from_integer(time_signature.0 as MusicNat);
+        let start_beats = start_pos.value.0 * Ratio::from_integer(time_signature.1 as MusicNat);
+        let event_beats = events[0].duration.value.0 * Ratio::from_integer(time_signature.1 as MusicNat);
+        let beats_into_measure = start_beats % measure_length_beats;
+        let beats_until_next_measure = measure_length_beats - beats_into_measure;
+
+        if event_beats <= beats_until_next_measure {
+            return self.render_chord(events);
+        }
+
+        let dur_before = Duration::from_beats_with_ts(beats_until_next_measure, time_signature);
+        let dur_after = events[0].duration - dur_before;
+
+        let first_events: Vec<Event> = events.iter().map(|e| Event { duration: dur_before, ..*e }).collect();
+        let second_events: Vec<Event> = events.iter().map(|e| Event {
+            start: e.start + dur_before,
+            duration: dur_after,
+            ..*e
+        }).collect();
+
+        let first_part = self.render_chord(&first_events);
+        let second_part = self.render_chord_with_measures(&second_events, start_pos + dur_before, time_signature);
+        format!("{}~{}", first_part, second_part)
     }
 
     fn render_event(&self, event: &Event) -> String {
@@ -464,7 +536,13 @@ impl LilyPondRenderer {
             writeln!(output, "      \\new Staff {{").unwrap();
             writeln!(output, "        \\clef treble").unwrap();
             writeln!(output, "        \\time {}/{}", ts.0, ts.1).unwrap();
-            self.render_staff_voices(output, &treble_tracks, ts, "        ");
+            let mut treble_comp = Composition {
+                tracks: treble_tracks.into_iter().map(|t| t.clone()).collect(),
+                time_signature: ts,
+            };
+            treble_comp.try_merge_all_tracks();
+            let treble_tracks = treble_comp.tracks;
+            self.render_staff_voices(output, &treble_tracks.iter().collect::<Vec<_>>(), ts, "        ");
             writeln!(output, "        \\bar \"|.\"").unwrap();
             writeln!(output, "      }}").unwrap();
         }
@@ -474,7 +552,13 @@ impl LilyPondRenderer {
             writeln!(output, "      \\new Staff {{").unwrap();
             writeln!(output, "        \\clef bass").unwrap();
             writeln!(output, "        \\time {}/{}", ts.0, ts.1).unwrap();
-            self.render_staff_voices(output, &bass_tracks, ts, "        ");
+            let mut bass_comp = Composition {
+                tracks: bass_tracks.into_iter().map(|t| t.clone()).collect(),
+                time_signature: ts,
+            };
+            bass_comp.try_merge_all_tracks();
+            let bass_tracks = bass_comp.tracks;
+            self.render_staff_voices(output, &bass_tracks.iter().collect::<Vec<_>>(), ts, "        ");
             writeln!(output, "        \\bar \"|.\"").unwrap();
             writeln!(output, "      }}").unwrap();
         }
@@ -750,7 +834,46 @@ mod render_fun {
     use music_primitives::{Duration, TimeSignature};
 
     #[test]
-    fn render_test_1() {
+    fn render_test_play() {
+        let mut rng = rand::rng();
+        let filename = "30_chord_progression";
+        let composition = compose_from_grammar(
+            format!("data/grammar/examples/{}.mt", filename).as_str(),
+            GrammarDerivationConfig {
+                iterations: 6,
+                panic_on_bad_production: true,
+                rounded: false,
+                max_depth: 10,
+            },
+            &mut rng,
+        )
+            .unwrap();
+        let mut all_events = vec![];
+        for track in composition.tracks.iter() {
+            all_events.extend(track.events.clone());
+        }
+        all_events.sort_by(|a, b| a.start.cmp(&b.start));
+        println!("All events in composition (sorted by start time):");
+        for event in all_events {
+            println!("\t{:?}", event);
+        }
+        let lilypond_filename = format!("data/lilypond/examples/{}.ly", filename);
+        render_to_lilypond(
+            composition,
+            lilypond_filename.as_str(),
+            Some(LilyPondConfig {
+                write_dynamics: false,
+                piano_staff: true,
+                ..LilyPondConfig::default()
+            }),
+        )
+            .unwrap();
+
+        call_lilypond_cli(lilypond_filename.as_str(), "data/lilypond/output", true).unwrap();
+    }
+    #[test]
+    fn render_test_regression() {
+        // this is a regression test. Do not change.
         // this is a succession of 3 chords, where each chord has 3 half notes.
         // It is in 4/4 and should last exactly 1 measure and 2 beats, without being rounded.
         let mut rng = rand::rng();

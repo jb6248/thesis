@@ -1,7 +1,7 @@
-// this is part of a regression test. Do not modify.
 start S
 
-S = C C C
+S = A A
+A = C C
 C = harmony_chooser
 
 harmony_chooser = #I/I

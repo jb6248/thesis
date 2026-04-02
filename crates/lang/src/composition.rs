@@ -63,6 +63,277 @@ mod test {
         assert!(mt2 > mt1);
     }
 
+    // ── try_merge helpers ────────────────────────────────────────────────────
+
+    fn make_track(instrument: Instrument, events: Vec<Event>) -> Track {
+        Track {
+            identifier: TrackId::Instrument(instrument),
+            instrument,
+            events,
+            rests: vec![],
+        }
+    }
+
+    fn make_track_with_rests(instrument: Instrument, events: Vec<Event>, rests: Vec<Event>) -> Track {
+        Track {
+            identifier: TrackId::Instrument(instrument),
+            instrument,
+            events,
+            rests,
+        }
+    }
+
+    fn ev(start_beats: u32, dur_beats: u32, pitch: Pitch, ts: TimeSignature) -> Event {
+        Event {
+            start: Duration::from_beats_with_ts(Beats::from_integer(start_beats), ts),
+            duration: Duration::from_beats_with_ts(Beats::from_integer(dur_beats), ts),
+            volume: Volume(80),
+            pitch,
+        }
+    }
+
+    // ── try_merge tests ──────────────────────────────────────────────────────
+
+    #[test]
+    fn try_merge_success_single_event() {
+        // Two tracks with one event each at the same start/duration but different pitches.
+        let ts = TimeSignature::common();
+        let c4 = Pitch::new(4, 1); // C4
+        let e4 = Pitch::new(4, 5); // E4
+        let a = make_track(Instrument::Piano, vec![ev(0, 2, c4, ts)]);
+        let b = make_track(Instrument::Piano, vec![ev(0, 2, e4, ts)]);
+        let merged = a.try_merge(&b).expect("should merge");
+        assert_eq!(merged.events.len(), 2);
+        assert!(merged.events.iter().any(|e| e.pitch == c4));
+        assert!(merged.events.iter().any(|e| e.pitch == e4));
+        // rests from self are preserved, none from other
+        assert!(merged.rests.is_empty());
+    }
+
+    #[test]
+    fn try_merge_success_multiple_events() {
+        // Both tracks have 2 events with identical timing but different pitches.
+        let ts = TimeSignature::common();
+        let c4 = Pitch::new(4, 1);
+        let e4 = Pitch::new(4, 5);
+        let g4 = Pitch::new(4, 8);
+        let b4 = Pitch::new(4, 12);
+        let a = make_track(Instrument::Piano, vec![ev(0, 2, c4, ts), ev(2, 2, g4, ts)]);
+        let b = make_track(Instrument::Piano, vec![ev(0, 2, e4, ts), ev(2, 2, b4, ts)]);
+        let merged = a.try_merge(&b).expect("should merge");
+        assert_eq!(merged.events.len(), 4);
+    }
+
+    #[test]
+    fn try_merge_fail_different_start_time() {
+        // Events have different start times.
+        let ts = TimeSignature::common();
+        let c4 = Pitch::new(4, 1);
+        let e4 = Pitch::new(4, 5);
+        let a = make_track(Instrument::Piano, vec![ev(0, 2, c4, ts)]);
+        let b = make_track(Instrument::Piano, vec![ev(1, 2, e4, ts)]);
+        assert!(a.try_merge(&b).is_none());
+    }
+
+    #[test]
+    fn try_merge_fail_different_duration() {
+        // Same start, but events last a different amount of time.
+        let ts = TimeSignature::common();
+        let c4 = Pitch::new(4, 1);
+        let e4 = Pitch::new(4, 5);
+        let a = make_track(Instrument::Piano, vec![ev(0, 2, c4, ts)]);
+        let b = make_track(Instrument::Piano, vec![ev(0, 3, e4, ts)]);
+        assert!(a.try_merge(&b).is_none());
+    }
+
+    #[test]
+    fn try_merge_fail_different_event_count() {
+        // self has 1 event, other has 2.
+        let ts = TimeSignature::common();
+        let c4 = Pitch::new(4, 1);
+        let e4 = Pitch::new(4, 5);
+        let g4 = Pitch::new(4, 8);
+        let a = make_track(Instrument::Piano, vec![ev(0, 4, c4, ts)]);
+        let b = make_track(Instrument::Piano, vec![ev(0, 2, e4, ts), ev(2, 2, g4, ts)]);
+        assert!(a.try_merge(&b).is_none());
+    }
+
+    #[test]
+    fn try_merge_fail_mismatched_span_via_rests() {
+        // Both have the same event timing, but `b` has a trailing rest that extends its end.
+        let ts = TimeSignature::common();
+        let c4 = Pitch::new(4, 1);
+        let e4 = Pitch::new(4, 5);
+        let trailing_rest = Event {
+            start: Duration::from_beats_with_ts(Beats::from_integer(2), ts),
+            duration: Duration::from_beats_with_ts(Beats::from_integer(2), ts),
+            volume: Volume(0),
+            pitch: Pitch::none(),
+        };
+        let a = make_track(Instrument::Piano, vec![ev(0, 2, c4, ts)]);
+        let b = make_track_with_rests(Instrument::Piano, vec![ev(0, 2, e4, ts)], vec![trailing_rest]);
+        // `b` ends at beat 4 while `a` ends at beat 2 → should not merge
+        assert!(a.try_merge(&b).is_none());
+    }
+
+    #[test]
+    fn try_merge_preserves_self_rests() {
+        // Rests from `self` appear in the merged result; rests from `other` do not.
+        let ts = TimeSignature::common();
+        let c4 = Pitch::new(4, 1);
+        let e4 = Pitch::new(4, 5);
+        let self_rest = Event {
+            start: Duration::from_beats_with_ts(Beats::from_integer(2), ts),
+            duration: Duration::from_beats_with_ts(Beats::from_integer(2), ts),
+            volume: Volume(0),
+            pitch: Pitch::none(),
+        };
+        let other_rest = Event {
+            start: Duration::from_beats_with_ts(Beats::from_integer(2), ts),
+            duration: Duration::from_beats_with_ts(Beats::from_integer(2), ts),
+            volume: Volume(0),
+            pitch: Pitch::none(),
+        };
+        // Both span [0, 4] via one event + one rest
+        let a = make_track_with_rests(Instrument::Piano, vec![ev(0, 2, c4, ts)], vec![self_rest]);
+        let b = make_track_with_rests(Instrument::Piano, vec![ev(0, 2, e4, ts)], vec![other_rest]);
+        let merged = a.try_merge(&b).expect("should merge");
+        assert_eq!(merged.events.len(), 2);
+        assert_eq!(merged.rests.len(), 1, "only self's rest should be kept");
+        assert_eq!(merged.rests[0], self_rest);
+    }
+
+    #[test]
+    fn try_merge_already_merged_track_with_fresh() {
+        // After a prior merge, self has 2 simultaneous events at slot (0, 2).
+        // Merging with a fresh track that has 1 event at (0, 2) should still succeed —
+        // the event-count check is not used; only distinct slots are compared.
+        let ts = TimeSignature::common();
+        let c4 = Pitch::new(4, 1);
+        let e4 = Pitch::new(4, 5);
+        let g4 = Pitch::new(4, 8);
+        let already_merged = make_track(Instrument::Piano, vec![ev(0, 2, c4, ts), ev(0, 2, e4, ts)]);
+        let fresh = make_track(Instrument::Piano, vec![ev(0, 2, g4, ts)]);
+        let result = already_merged.try_merge(&fresh).expect("should merge");
+        assert_eq!(result.events.len(), 3);
+        assert!(result.events.iter().any(|e| e.pitch == g4));
+    }
+
+    #[test]
+    fn try_merge_already_merged_track_mismatch() {
+        // self has events at slots (0,2) and (2,2); other only covers (0,2).
+        // Different distinct slot sets → None.
+        let ts = TimeSignature::common();
+        let c4 = Pitch::new(4, 1);
+        let e4 = Pitch::new(4, 5);
+        let g4 = Pitch::new(4, 8);
+        let a = make_track(Instrument::Piano, vec![ev(0, 2, c4, ts), ev(2, 2, g4, ts)]);
+        // b has a trailing rest to match the span [0,4], but only one event slot
+        let trailing_rest = Event {
+            start: Duration::from_beats_with_ts(Beats::from_integer(2), ts),
+            duration: Duration::from_beats_with_ts(Beats::from_integer(2), ts),
+            volume: Volume(0),
+            pitch: Pitch::none(),
+        };
+        let b = make_track_with_rests(Instrument::Piano, vec![ev(0, 2, e4, ts)], vec![trailing_rest]);
+        assert!(a.try_merge(&b).is_none());
+    }
+
+    // ── try_merge_all_tracks tests ───────────────────────────────────────────
+
+    fn make_composition(ts: TimeSignature, tracks: Vec<Track>) -> Composition {
+        Composition { tracks, time_signature: ts }
+    }
+
+    #[test]
+    fn try_merge_all_tracks_two_mergeable() {
+        // Two tracks with identical timing — should collapse to one track with 2 events.
+        let ts = TimeSignature::common();
+        let c4 = Pitch::new(4, 1);
+        let e4 = Pitch::new(4, 5);
+        let mut comp = make_composition(ts, vec![
+            make_track(Instrument::Piano, vec![ev(0, 4, c4, ts)]),
+            make_track(Instrument::Piano, vec![ev(0, 4, e4, ts)]),
+        ]);
+        comp.try_merge_all_tracks();
+        assert_eq!(comp.tracks.len(), 1);
+        assert_eq!(comp.tracks[0].events.len(), 2);
+    }
+
+    #[test]
+    fn try_merge_all_tracks_three_mergeable() {
+        // Three tracks with identical timing — should collapse to one track with 3 events.
+        let ts = TimeSignature::common();
+        let c4 = Pitch::new(4, 1);
+        let e4 = Pitch::new(4, 5);
+        let g4 = Pitch::new(4, 8);
+        let mut comp = make_composition(ts, vec![
+            make_track(Instrument::Piano, vec![ev(0, 4, c4, ts)]),
+            make_track(Instrument::Piano, vec![ev(0, 4, e4, ts)]),
+            make_track(Instrument::Piano, vec![ev(0, 4, g4, ts)]),
+        ]);
+        comp.try_merge_all_tracks();
+        assert_eq!(comp.tracks.len(), 1);
+        assert_eq!(comp.tracks[0].events.len(), 3);
+    }
+
+    #[test]
+    fn try_merge_all_tracks_none_mergeable() {
+        // Tracks have different timing — no merges possible.
+        let ts = TimeSignature::common();
+        let c4 = Pitch::new(4, 1);
+        let e4 = Pitch::new(4, 5);
+        let mut comp = make_composition(ts, vec![
+            make_track(Instrument::Piano, vec![ev(0, 2, c4, ts)]),
+            make_track(Instrument::Piano, vec![ev(0, 4, e4, ts)]),
+        ]);
+        comp.try_merge_all_tracks();
+        assert_eq!(comp.tracks.len(), 2, "tracks with different timing must not merge");
+    }
+
+    #[test]
+    fn try_merge_all_tracks_mixed() {
+        // Three tracks: tracks 0 and 2 share timing; track 1 does not.
+        // Result: 2 tracks — one merged (0+2) and one untouched (1).
+        let ts = TimeSignature::common();
+        let c4 = Pitch::new(4, 1);
+        let e4 = Pitch::new(4, 5);
+        let g4 = Pitch::new(4, 8);
+        let mut comp = make_composition(ts, vec![
+            make_track(Instrument::Piano, vec![ev(0, 2, c4, ts)]),   // merges with track 2
+            make_track(Instrument::Piano, vec![ev(0, 4, e4, ts)]),   // different timing
+            make_track(Instrument::Piano, vec![ev(0, 2, g4, ts)]),   // merges with track 0
+        ]);
+        comp.try_merge_all_tracks();
+        assert_eq!(comp.tracks.len(), 2);
+        let event_counts: Vec<usize> = {
+            let mut v: Vec<usize> = comp.tracks.iter().map(|t| t.events.len()).collect();
+            v.sort();
+            v
+        };
+        assert_eq!(event_counts, vec![1, 2]);
+    }
+
+    #[test]
+    fn try_merge_all_tracks_multi_slot_three_voices() {
+        // Three tracks each with two events over two time slots — all should merge.
+        let ts = TimeSignature::common();
+        let c4 = Pitch::new(4, 1);
+        let e4 = Pitch::new(4, 5);
+        let g4 = Pitch::new(4, 8);
+        let d4 = Pitch::new(4, 3);
+        let f4 = Pitch::new(4, 6);
+        let a4 = Pitch::new(4, 10);
+        let mut comp = make_composition(ts, vec![
+            make_track(Instrument::Piano, vec![ev(0, 2, c4, ts), ev(2, 2, d4, ts)]),
+            make_track(Instrument::Piano, vec![ev(0, 2, e4, ts), ev(2, 2, f4, ts)]),
+            make_track(Instrument::Piano, vec![ev(0, 2, g4, ts), ev(2, 2, a4, ts)]),
+        ]);
+        comp.try_merge_all_tracks();
+        assert_eq!(comp.tracks.len(), 1);
+        assert_eq!(comp.tracks[0].events.len(), 6);
+    }
+
     // #[test]
     // fn test_music_time_sub_1() {
     //     let ts = TimeSignature::common();
@@ -356,6 +627,61 @@ impl Track {
         }
     }
 
+    /// Tries to merge `other` into `self` by stacking their events (creating simultaneous notes).
+    ///
+    /// Succeeds only if:
+    /// - Both tracks span the same time range (`get_start` and `get_end` match).
+    /// - The **distinct** set of `(start, duration)` time slots used by `self`'s events equals
+    ///   the distinct set used by `other`'s events. Multiplicity is ignored so that a track
+    ///   that has already been merged (and therefore carries simultaneous events at a slot) can
+    ///   still be merged with a fresh single-event track at that same slot.
+    ///
+    /// When successful, returns a clone of `self` with `other`'s events appended (rests are kept
+    /// from `self` only). Returns `None` if any condition is not met.
+    pub fn try_merge(&self, other: &Track) -> Option<Track> {
+        // Both tracks must span the same time range.
+        if self.get_start() != other.get_start() {
+            return None;
+        }
+
+        // get_end needs a TimeSignature, but its implementation ignores the parameter
+        // (it only adds start + duration). Extract it from the first available Duration.
+        let ts = self
+            .events
+            .first()
+            .map(|e| e.start.time_signature)
+            .or_else(|| self.rests.first().map(|e| e.start.time_signature))
+            .or_else(|| other.events.first().map(|e| e.start.time_signature))
+            .or_else(|| other.rests.first().map(|e| e.start.time_signature));
+
+        if let Some(ts) = ts {
+            if self.get_end(ts) != other.get_end(ts) {
+                return None;
+            }
+        }
+
+        // Compare the distinct (start, duration) time slots used by each track's events.
+        // Deduplication means a merged track (with simultaneous events sharing a slot) compares
+        // equal to a track with a single event at that slot.
+        fn distinct_slots(events: &[Event]) -> Vec<(Duration, Duration)> {
+            let mut slots: Vec<(Duration, Duration)> =
+                events.iter().map(|e| (e.start, e.duration)).collect();
+            slots.sort();
+            slots.dedup();
+            slots
+        }
+
+        if distinct_slots(&self.events) != distinct_slots(&other.events) {
+            return None;
+        }
+
+        // All checks passed — merge.
+        let mut merged = self.clone();
+        merged.events.extend(other.events.iter().copied());
+        merged.events.sort();
+        Some(merged)
+    }
+
     /// Append another track to the end of this track.
     /// The other track's events will be shifted to start after this track ends.
     /// Panics if the instruments don't match.
@@ -515,6 +841,31 @@ impl Composition {
     pub fn compress(&mut self, compression: TimeCompression) {
         for track in &mut self.tracks {
             track.compress(self.time_signature, compression);
+        }
+    }
+
+    /// Repeatedly tries to merge every pair of tracks until no more merges are possible.
+    ///
+    /// On each pass the method scans all pairs (i, j) with i < j. The first successful
+    /// `try_merge` replaces `tracks[i]` with the merged result, removes `tracks[j]`, and
+    /// restarts the scan from the beginning. The loop terminates when a full pass produces
+    /// no merge. This is at least O(n²) per pass and O(n³) overall in the worst case.
+    pub fn try_merge_all_tracks(&mut self) {
+        loop {
+            let mut any_merged = false;
+            'outer: for i in 0..self.tracks.len() {
+                for j in (i + 1)..self.tracks.len() {
+                    if let Some(merged) = self.tracks[i].try_merge(&self.tracks[j]) {
+                        self.tracks[i] = merged;
+                        self.tracks.remove(j);
+                        any_merged = true;
+                        break 'outer;
+                    }
+                }
+            }
+            if !any_merged {
+                break;
+            }
         }
     }
 }
@@ -854,6 +1205,47 @@ mod composition_element_tests {
                 Duration::from_beats_with_ts(Beats::from_integer(0), ts)
             );
         }
+    }
+
+    #[test]
+    fn test_compose_v2_sequential_splits() {
+        // Two splits in sequence, each with 2-beat branches.
+        // Total duration must be 4 beats, not inflated by the rests inserted during shift_by.
+        let ts = TimeSignature::common();
+        let make_split = || MusicPrimitive::Split {
+            branches: vec![
+                MusicString(vec![MusicPrimitive::Simple(Symbol::T(
+                    Terminal::CurrentSound {
+                        duration: Duration::from_beats_with_ts(Beats::from_integer(2), ts),
+                    },
+                ))]),
+                MusicString(vec![MusicPrimitive::Simple(Symbol::T(
+                    Terminal::CurrentSound {
+                        duration: Duration::from_beats_with_ts(Beats::from_integer(2), ts),
+                    },
+                ))]),
+            ],
+        };
+        let music_string = MusicString(vec![make_split(), make_split()]);
+        let composition = music_string
+            .compose_v2(
+                ts,
+                Performer {
+                    instrument: Instrument::Piano,
+                    volume: Volume(80),
+                    pitch: Pitch::middle_c(),
+                },
+            )
+            .unwrap();
+
+        // 4 tracks total (2 branches × 2 splits)
+        assert_eq!(composition.tracks.len(), 4);
+        // Total span should be exactly 4 beats
+        assert_eq!(
+            composition.get_duration(),
+            Duration::from_beats_with_ts(Beats::from_integer(4), ts),
+            "Two sequential 2-beat splits should produce 4 beats total"
+        );
     }
 }
 

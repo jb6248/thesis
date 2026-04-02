@@ -933,12 +933,10 @@ impl MusicString {
                         .map(|ms| ms.compose_v2(time_signature, performer.clone()))
                         .err_first()?
                         .map(|mut c| {
+                            let dur = c.get_duration();
                             c.shift_by(offset, true);
-                            c
+                            (dur, c)
                         })
-                        .map(|c|
-                            (c.get_duration(), c)
-                        )
                         .collect();
                     if comps.is_empty() {
                         Duration::zero(time_signature)

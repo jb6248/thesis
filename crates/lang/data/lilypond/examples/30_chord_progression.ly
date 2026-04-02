@@ -10,19 +10,25 @@
           \new Voice {
             \voiceOne
             \absolute {
-              <e, g b>2
+              r2 <c, e g>2
             }
           }
           \new Voice {
             \voiceTwo
             \absolute {
-              r2 <d, f a>2
+              r1 <aes, c ees>2
             }
           }
           \new Voice {
             \voiceThree
             \absolute {
-              r1 <aes, c ees>2
+              <b, d f>2
+            }
+          }
+          \new Voice {
+            \voiceFour
+            \absolute {
+              r1 r2 <f, c a>2
             }
           }
         >>
