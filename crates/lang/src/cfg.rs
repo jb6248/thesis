@@ -936,7 +936,9 @@ impl MusicString {
                             c.shift_by(offset, true);
                             c
                         })
-                        .map(|c| (c.get_duration(), c))
+                        .map(|c|
+                            (c.get_duration(), c)
+                        )
                         .collect();
                     if comps.is_empty() {
                         Duration::zero(time_signature)
@@ -945,7 +947,9 @@ impl MusicString {
                         let (dur, has_uniform_duration) = comps
                             .iter()
                             .map(|(d, _c)| (*d, true))
-                            .reduce(|(d1, ok1), (d2, ok2)| (d1, ok1 && ok2 && d1 == d2))
+                            .reduce(|(d1, ok1), (d2, ok2)| {
+                                (d1, ok1 && ok2 && d1 == d2)
+                            })
                             .unwrap();
                         if !has_uniform_duration {
                             return Err(ComposeError::MismatchedLengths(format!(

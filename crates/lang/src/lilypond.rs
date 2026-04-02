@@ -742,26 +742,40 @@ mod tests {
 
 #[cfg(test)]
 mod render_fun {
+    use num::rational::Ratio;
+    use num::Zero;
     use crate::cfg::{Grammar, MusicPrimitive, MusicString, GrammarDerivationConfig, Performer};
     use crate::compose_from_grammar;
     use crate::lilypond::{LilyPondConfig, call_lilypond_cli, render_to_lilypond};
-    use music_primitives::TimeSignature;
+    use music_primitives::{Duration, TimeSignature};
 
     #[test]
     fn render_test_1() {
+        // this is a succession of 3 chords, where each chord has 3 half notes.
+        // It is in 4/4 and should last exactly 1 measure and 2 beats, without being rounded.
         let mut rng = rand::rng();
-        let filename = "24_drone_melody"; // "02_repeat_pattern";
+        let filename = "29_chord_progression";
         let composition = compose_from_grammar(
             format!("data/grammar/examples/{}.mt", filename).as_str(),
             GrammarDerivationConfig {
-                iterations: 3,
+                iterations: 6,
                 panic_on_bad_production: true,
-                rounded: true,
+                rounded: false,
                 max_depth: 10,
             },
             &mut rng,
         )
         .unwrap();
+        let mut all_events = vec![];
+        for track in composition.tracks.iter() {
+            all_events.extend(track.events.clone());
+        }
+        all_events.sort_by(|a, b| a.start.cmp(&b.start));
+        println!("All events in composition (sorted by start time):");
+        for event in all_events {
+            println!("\t{:?}", event);
+        }
+        assert_eq!(composition.get_duration(), Duration::measures_and_beats_with_ts(1, Ratio::from_integer(2), TimeSignature::common()), "Total composition length is 1.5 measures");
         let lilypond_filename = format!("data/lilypond/examples/{}.ly", filename);
         render_to_lilypond(
             composition,

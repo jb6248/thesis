@@ -1,8 +1,6 @@
 start S
 
-S = A A
-A = B B
-B = C C
+S = C C C
 C = harmony_chooser
 
 harmony_chooser = #I/I
