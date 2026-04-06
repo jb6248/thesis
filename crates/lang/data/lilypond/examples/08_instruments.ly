@@ -7,7 +7,15 @@
         \clef treble
         \time 4/4
         \absolute {
-          <ees' fis'' bes''>2 <g' d'' b''>2 <b' d'' fis''>2 <d' f'' a''>2 <e' g'' b''>2 <c' e'' g''>2 <e' g'' b''>2 <c' e'' g''>2
+          c'4 d'4 e'4 f'4
+        }
+        \bar "|."
+      }
+      \new Staff {
+        \clef bass
+        \time 4/4
+        \absolute {
+          c2 g2
         }
         \bar "|."
       }

@@ -17,7 +17,13 @@ use crate::genetic_simulation::grammar_derivation_genome4::GrammarDerivationGeno
 
 fn main() {
     // we are going to run a simulation
-    experiment_5(5);
+    // template_5(3, 0.05, "data/experiments/5.1");
+    // template_5(3, 0.1, "data/experiments/5.2");
+    // template_5(3, 0.2, "data/experiments/5.3");
+    // template_5(3, 0.4, "data/experiments/5.4");
+    // template_5(3, 0.4, "data/experiments/6");
+    template_5(3, 0.4, "data/experiments/7");
+
 }
 
 /// Renders a GrammarDerivationGenome2 to a LilyPond file and compiles it.
@@ -407,18 +413,16 @@ fn experiment_4(trials: usize) {
     }
 }
 
-fn experiment_5(trials: usize) {
+fn template_5(trials: usize, distance_bias: f64, experiment_location: &str) {
     // this uses hierarchical analysis of prolongational trees
-    const EXPERIMENT_LOCATION: &str = "data/experiments/5";
     // --- constants ---
-    let grammar_file    = &format!("{EXPERIMENT_LOCATION}/grammar.mt");
+    let grammar_file    = &format!("{experiment_location}/grammar.mt");
     let population_size   = 100;
-    let generations       = 100;
+    let generations       = 1_000;
     let p_crossover       = 0.7;
     let p_mutation        = 0.2;
     let iterations        = 5;
     let max_depth         = 10;
-    let distance_bias      = 0.1;
 
     // logs
     let log_every = 20; // print metrics every N generations
@@ -469,12 +473,13 @@ fn experiment_5(trials: usize) {
         // Show chord progressions for the top 5 genomes
         for (rank, (genome, fitness)) in final_metrics.best_genomes.iter().enumerate() {
             println!("  -- Top genome #{} (fitness: {:.4}):", rank + 1, fitness);
-            genome.show_chord_progression();
+            genome.show_overall_branching_split();
+            genome.show_prolongational_branching();
         }
 
         // Render the best genome to LilyPond
         let (best_genome, _) = &final_metrics.best_genomes[0];
-        let ly_path = format!("{EXPERIMENT_LOCATION}/trial_{}_best.ly", trial + 1);
+        let ly_path = format!("{experiment_location}/trial_{}_best.ly", trial + 1);
         render_grammar_derivation_to_lilypond(&best_genome.0, grammar.time_signature, &ly_path);
 
         trial_best_fitnesses.push(final_metrics.best_fitness);
@@ -493,7 +498,102 @@ fn experiment_5(trials: usize) {
     };
 
     println!("\n============================");
-    println!("Experiment 2 Summary ({} trials)", trials);
+    println!("Experiment 5 Summary ({} trials)", trials);
+    println!("============================");
+    println!("  Best fitness  — mean: {:.4}, std: {:.4}, min: {:.4}, max: {:.4}",
+        mean_best, std_best, min_best, max_best);
+    println!("  Average fitness (mean across trials): {:.4}", mean_avg);
+    for (i, (best, avg)) in trial_best_fitnesses.iter().zip(trial_avg_fitnesses.iter()).enumerate() {
+        println!("  Trial {:>2}: best = {:.4}, avg = {:.4}", i + 1, best, avg);
+    }
+}
+
+fn template_6(trials: usize, distance_bias: f64, experiment_location: &str) {
+    // this uses hierarchical analysis of prolongational trees
+    // --- constants ---
+    let grammar_file    = &format!("{experiment_location}/grammar.mt");
+    let population_size   = 100;
+    let generations       = 1_000;
+    let p_crossover       = 0.7;
+    let p_mutation        = 0.2;
+    let iterations        = 5;
+    let max_depth         = 10;
+
+    // logs
+    let log_every = 20; // print metrics every N generations
+    let top_n = 5; // how many of the best genomes to show at the end of each trial
+
+    // --- setup ---
+    let grammar = grammar_from_file(grammar_file)
+        .expect("Failed to load grammar file");
+
+    let generator = GrammarDerivationGenerator::new(
+        GrammarDerivationConfig {
+            iterations,
+            panic_on_bad_production: false,
+            rounded: true,
+            max_depth,
+        },
+        &grammar,
+    );
+
+    let analysis_params = genetic_simulation::grammar_derivation_genome4::AnalysisParams4 {
+        distance_bias
+    };
+
+    let config = Arc::new((generator, analysis_params));
+
+    // --- run trials ---
+    let mut trial_best_fitnesses: Vec<f64> = Vec::with_capacity(trials);
+    let mut trial_avg_fitnesses: Vec<f64> = Vec::with_capacity(trials);
+
+    for trial in 0..trials {
+        println!("\n=== Trial {}/{} ===", trial + 1, trials);
+
+        let mut simulation: Simulation<GrammarDerivationGenome4> =
+            Simulation::new(population_size, Arc::clone(&config), p_crossover, p_mutation);
+
+        for generation in 0..generations {
+            simulation.step();
+
+            if (generation + 1) % log_every == 0 {
+                let metrics = simulation.calculate_metrics(1);
+                println!("  Generation {:>4}: {}", generation + 1, metrics.summary());
+            }
+        }
+
+        let final_metrics = simulation.calculate_metrics(top_n);
+        println!("  Final: {}", final_metrics.summary());
+
+        // Show chord progressions for the top 5 genomes
+        for (rank, (genome, fitness)) in final_metrics.best_genomes.iter().enumerate() {
+            println!("  -- Top genome #{} (fitness: {:.4}):", rank + 1, fitness);
+            genome.show_overall_branching_split();
+            genome.show_prolongational_branching();
+        }
+
+        // Render the best genome to LilyPond
+        let (best_genome, _) = &final_metrics.best_genomes[0];
+        let ly_path = format!("{experiment_location}/trial_{}_best.ly", trial + 1);
+        render_grammar_derivation_to_lilypond(&best_genome.0, grammar.time_signature, &ly_path);
+
+        trial_best_fitnesses.push(final_metrics.best_fitness);
+        trial_avg_fitnesses.push(final_metrics.average_fitness);
+    }
+
+    // --- summarize ---
+    let n = trials as f64;
+    let mean_best = trial_best_fitnesses.iter().sum::<f64>() / n;
+    let mean_avg  = trial_avg_fitnesses.iter().sum::<f64>() / n;
+    let min_best  = trial_best_fitnesses.iter().cloned().fold(f64::INFINITY, f64::min);
+    let max_best  = trial_best_fitnesses.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let std_best  = {
+        let variance = trial_best_fitnesses.iter().map(|x| (x - mean_best).powi(2)).sum::<f64>() / n;
+        variance.sqrt()
+    };
+
+    println!("\n============================");
+    println!("Experiment 5 Summary ({} trials)", trials);
     println!("============================");
     println!("  Best fitness  — mean: {:.4}, std: {:.4}, min: {:.4}, max: {:.4}",
         mean_best, std_best, min_best, max_best);

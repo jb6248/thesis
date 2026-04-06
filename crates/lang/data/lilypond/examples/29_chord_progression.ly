@@ -6,26 +6,9 @@
       \new Staff {
         \clef bass
         \time 4/4
-        <<
-          \new Voice {
-            \voiceOne
-            \absolute {
-              <e, g b>2
-            }
-          }
-          \new Voice {
-            \voiceTwo
-            \absolute {
-              r2 <d, f a>2
-            }
-          }
-          \new Voice {
-            \voiceThree
-            \absolute {
-              r1 <aes, c ees>2
-            }
-          }
-        >>
+        \absolute {
+          <a, c e>2 <b, ees fis>2 <e, g b>2
+        }
         \bar "|."
       }
     >>

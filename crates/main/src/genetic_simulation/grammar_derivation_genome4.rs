@@ -1,9 +1,11 @@
+use std::fmt::Display;
 use crate::genetic_simulation::Genome;
 use music_turtle_lang::cfg::{
     Grammar, GrammarDerivation, GrammarDerivationConfig, GrammarDerivationGenerator, NonTerminal,
 };
 use rand::Rng;
 use std::sync::Arc;
+use display_tree::println_tree;
 use crate::distance::pitch_class_space::PitchClassSpace;
 use crate::genetic_simulation::analysis::{extract_chord_structure, extract_symbolic_chord_structure};
 use crate::genetic_simulation::analysis::lerdahl::{get_maximum_distance, get_total_interchordal_distances};
@@ -20,10 +22,34 @@ pub struct AnalysisParams4 {
 #[derive(Debug, Clone)]
 pub struct GrammarDerivationGenome4(pub GrammarDerivation);
 
+fn print_vec_plain<T: Display>(vec: Vec<T>, delimiter: &str) {
+
+}
+
 impl GrammarDerivationGenome4 {
     pub fn show_chord_progression(&self) {
         let chord_progression = extract_symbolic_chord_structure(&self.0, CHORD_PREFIX);
-        println!("{:?}", chord_progression);
+        println!("{:?}", chord_progression.join(" "));
+    }
+
+    /// Determine the best prolongational branching and show where it splits!
+    pub fn show_overall_branching_split(&self) {
+        let symbols = extract_symbolic_chord_structure(&self.0, CHORD_PREFIX);
+        let chord_progression = extract_chord_structure(&self.0, CHORD_PREFIX);
+        let (score, left, right) = find_best_tension_relaxation_split_and_score(&chord_progression, &INITIAL_CHORD);
+        let left_size = left.count_leaves();
+        assert_eq!(left.count_leaves() + right.count_leaves(), symbols.len(), "Leaves should add up to total symbols");
+        println!("{} | {}", (&symbols[..left_size]).join(" "), (&symbols[left_size..]).join(" "));
+    }
+
+    pub fn show_prolongational_branching(&self) {
+        let symbols = extract_symbolic_chord_structure(&self.0, CHORD_PREFIX);
+        let chord_progression = extract_chord_structure(&self.0, CHORD_PREFIX);
+        let (score, left, right) = find_best_tension_relaxation_split_and_score(&chord_progression, &INITIAL_CHORD);
+        println!("left:");
+        println_tree!(left);
+        println!("right:");
+        println_tree!(right);
     }
 }
 impl Genome for GrammarDerivationGenome4 {

@@ -7,7 +7,7 @@
         \clef treble
         \time 4/4
         \absolute {
-          <ees' fis'' bes''>2 <g' d'' b''>2 <b' d'' fis''>2 <d' f'' a''>2 <e' g'' b''>2 <c' e'' g''>2 <e' g'' b''>2 <c' e'' g''>2
+          <g' d'' bes''>2 <c' e'' g''>2 <aes' ees'' b''>2 <g' d'' bes''>2 <g' d'' bes''>2 <a' cis'' e''>2 <a' cis'' e''>2 <a' c'' e''>2
         }
         \bar "|."
       }
