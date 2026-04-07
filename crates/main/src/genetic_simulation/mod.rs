@@ -3,6 +3,7 @@ pub mod analysis;
 pub mod grammar_derivation_genome2;
 pub mod grammar_derivation_genome3;
 pub mod grammar_derivation_genome4;
+pub mod grammar_derivation_genome5;
 
 pub use grammar_derivation_genome::GrammarDerivationGenome;
 
@@ -133,6 +134,10 @@ impl<C: Sync, G: Genome<Config = C> + Clone + ?Sized + Sync> Simulation<G> {
         }
 
         self.population = new_population;
+    }
+
+    pub fn get_population(&self) -> &[G] {
+        &self.population
     }
 
     /// Calculate metrics for the current population.

@@ -3,6 +3,7 @@ mod distance;
 mod util;
 pub mod template_6;
 mod early_experiments;
+mod template_7;
 
 use music_primitives::{Pitch, TimeSignature};
 use music_turtle_lang::cfg::{GrammarDerivation, Performer};
@@ -10,6 +11,7 @@ use music_turtle_lang::composition::Instrument::Piano;
 use music_turtle_lang::composition::Volume;
 use music_turtle_lang::lilypond::{call_lilypond_cli, render_to_lilypond, LilyPondConfig};
 use crate::template_6::template_6;
+use crate::template_7::template_7;
 
 fn main() {
     // we are going to run a simulation
@@ -18,7 +20,8 @@ fn main() {
     // template_5(3, 0.2, "data/experiments/5.3");
     // template_5(3, 0.4, "data/experiments/5.4");
     // template_5(3, 0.4, "data/experiments/6");
-    template_6(3, 0.4, "data/experiments/7");
+    // template_6(3, 0.4, "data/experiments/7");
+    template_7(1, 0.4, "data/experiments/8");
 }
 
 /// Renders a GrammarDerivationGenome2 to a LilyPond file and compiles it.
