@@ -10,16 +10,20 @@ use std::io::Write;
 use std::path::Path;
 use std::process::Stdio;
 
-pub fn call_lilypond_cli(lilypond_file: &str, output_folder: &str, print_output: bool) -> std::io::Result<()> {
+pub fn call_lilypond_cli(
+    lilypond_file: &str,
+    output_folder: &str,
+    print_output: bool,
+) -> std::io::Result<()> {
     use std::process::Command;
 
     let mut cmd = Command::new("lilypond");
-    cmd
-        .arg("-o")
-        .arg(output_folder)
-        .arg(lilypond_file)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+    cmd.arg("-o").arg(output_folder).arg(lilypond_file);
+    if print_output {
+        cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+    } else {
+        cmd.stdout(Stdio::null()).stderr(Stdio::null());
+    }
     println!("> {:?}", cmd);
     io::stdout().flush()?;
     io::stderr().flush()?;
@@ -209,17 +213,32 @@ impl LilyPondRenderer {
             // Fill any gap before this slot with a rest.
             if start > current_pos {
                 let gap = start - current_pos;
-                write!(output, "{} ", self.render_rest_with_measures(gap, current_pos, time_signature)).unwrap();
+                write!(
+                    output,
+                    "{} ",
+                    self.render_rest_with_measures(gap, current_pos, time_signature)
+                )
+                .unwrap();
                 current_pos = start;
             }
 
             if is_rest {
                 let rest = events[0];
-                write!(output, "{} ", self.render_rest_with_measures(rest.duration, current_pos, time_signature)).unwrap();
+                write!(
+                    output,
+                    "{} ",
+                    self.render_rest_with_measures(rest.duration, current_pos, time_signature)
+                )
+                .unwrap();
                 current_pos = start + rest.duration;
             } else {
                 let slot_duration = events[0].duration;
-                write!(output, "{} ", self.render_chord_with_measures(&events, current_pos, time_signature)).unwrap();
+                write!(
+                    output,
+                    "{} ",
+                    self.render_chord_with_measures(&events, current_pos, time_signature)
+                )
+                .unwrap();
                 current_pos = start + slot_duration;
             }
         }
@@ -237,9 +256,15 @@ impl LilyPondRenderer {
         }
         let duration = events[0].duration;
         if !duration.binary_expandable() {
-            panic!("Chord duration {:?} is not binary expandable for LilyPond rendering!", duration);
+            panic!(
+                "Chord duration {:?} is not binary expandable for LilyPond rendering!",
+                duration
+            );
         }
-        let pitches: Vec<String> = events.iter().map(|e| self.pitch_to_lilypond(e.pitch)).collect();
+        let pitches: Vec<String> = events
+            .iter()
+            .map(|e| self.pitch_to_lilypond(e.pitch))
+            .collect();
         let pitch_cluster = format!("<{}>", pitches.join(" "));
         let expanded = duration.binary_expand(self.config.min_neg_power);
         let mut result = String::new();
@@ -257,13 +282,19 @@ impl LilyPondRenderer {
                 } else {
                     String::new()
                 }
-            ).unwrap();
+            )
+            .unwrap();
         }
         result.trim().to_string()
     }
 
     /// Like `render_event_with_measures` but for a chord slot (slice of simultaneous events).
-    fn render_chord_with_measures(&self, events: &[Event], start_pos: Duration, time_signature: TimeSignature) -> String {
+    fn render_chord_with_measures(
+        &self,
+        events: &[Event],
+        start_pos: Duration,
+        time_signature: TimeSignature,
+    ) -> String {
         use music_primitives::MusicNat;
         use num::rational::Ratio;
 
@@ -273,7 +304,8 @@ impl LilyPondRenderer {
 
         let measure_length_beats = Ratio::<MusicNat>::from_integer(time_signature.0 as MusicNat);
         let start_beats = start_pos.value.0 * Ratio::from_integer(time_signature.1 as MusicNat);
-        let event_beats = events[0].duration.value.0 * Ratio::from_integer(time_signature.1 as MusicNat);
+        let event_beats =
+            events[0].duration.value.0 * Ratio::from_integer(time_signature.1 as MusicNat);
         let beats_into_measure = start_beats % measure_length_beats;
         let beats_until_next_measure = measure_length_beats - beats_into_measure;
 
@@ -284,21 +316,34 @@ impl LilyPondRenderer {
         let dur_before = Duration::from_beats_with_ts(beats_until_next_measure, time_signature);
         let dur_after = events[0].duration - dur_before;
 
-        let first_events: Vec<Event> = events.iter().map(|e| Event { duration: dur_before, ..*e }).collect();
-        let second_events: Vec<Event> = events.iter().map(|e| Event {
-            start: e.start + dur_before,
-            duration: dur_after,
-            ..*e
-        }).collect();
+        let first_events: Vec<Event> = events
+            .iter()
+            .map(|e| Event {
+                duration: dur_before,
+                ..*e
+            })
+            .collect();
+        let second_events: Vec<Event> = events
+            .iter()
+            .map(|e| Event {
+                start: e.start + dur_before,
+                duration: dur_after,
+                ..*e
+            })
+            .collect();
 
         let first_part = self.render_chord(&first_events);
-        let second_part = self.render_chord_with_measures(&second_events, start_pos + dur_before, time_signature);
+        let second_part =
+            self.render_chord_with_measures(&second_events, start_pos + dur_before, time_signature);
         format!("{}~{}", first_part, second_part)
     }
 
     fn render_event(&self, event: &Event) -> String {
         if !event.duration.binary_expandable() {
-            panic!("Event duration {:?} is not binary expandable for LilyPond rendering!", event.duration);
+            panic!(
+                "Event duration {:?} is not binary expandable for LilyPond rendering!",
+                event.duration
+            );
         }
         // do this for each expanded duration and tie them together with ~
         let mut result = String::new();
@@ -327,7 +372,10 @@ impl LilyPondRenderer {
     fn render_rest(&self, duration: Duration) -> String {
         // render multiple rests (no need to tie them together) based on binary expansion
         if !duration.binary_expandable() {
-            panic!("Rest duration {:?} is not binary expandable for LilyPond rendering!", duration);
+            panic!(
+                "Rest duration {:?} is not binary expandable for LilyPond rendering!",
+                duration
+            );
         }
         let expanded_durations = duration.binary_expand(self.config.min_neg_power);
         let mut result = String::new();
@@ -338,7 +386,12 @@ impl LilyPondRenderer {
     }
 
     /// Render an event, splitting it at measure boundaries if necessary
-    fn render_event_with_measures(&self, event: &Event, start_pos: Duration, time_signature: TimeSignature) -> String {
+    fn render_event_with_measures(
+        &self,
+        event: &Event,
+        start_pos: Duration,
+        time_signature: TimeSignature,
+    ) -> String {
         use music_primitives::{Beats, MusicNat, NoteValue};
         use num::rational::Ratio;
 
@@ -349,7 +402,8 @@ impl LilyPondRenderer {
         // In time signature n/d, 1 beat = 1/d note value
         // So note_value / (1/d) = note_value * d = beats
         let start_beats = start_pos.value.0 * Ratio::from_integer(time_signature.1 as MusicNat);
-        let event_beats = event.duration.value.0 * Ratio::from_integer(time_signature.1 as MusicNat);
+        let event_beats =
+            event.duration.value.0 * Ratio::from_integer(time_signature.1 as MusicNat);
 
         // Find position within current measure (in beats)
         let beats_into_measure = start_beats % measure_length_beats;
@@ -361,7 +415,8 @@ impl LilyPondRenderer {
         }
 
         // Otherwise, split at measure boundary
-        let duration_before_boundary = Duration::from_beats_with_ts(beats_until_next_measure, time_signature);
+        let duration_before_boundary =
+            Duration::from_beats_with_ts(beats_until_next_measure, time_signature);
         let duration_after_boundary = event.duration - duration_before_boundary;
 
         // Create first part
@@ -382,13 +437,22 @@ impl LilyPondRenderer {
 
         // Render both parts with tie
         let first_part = self.render_event(&first_event);
-        let second_part = self.render_event_with_measures(&second_event, start_pos + duration_before_boundary, time_signature);
+        let second_part = self.render_event_with_measures(
+            &second_event,
+            start_pos + duration_before_boundary,
+            time_signature,
+        );
 
         format!("{}~{}", first_part, second_part)
     }
 
     /// Render a rest, splitting it at measure boundaries if necessary (no ties)
-    fn render_rest_with_measures(&self, duration: Duration, start_pos: Duration, time_signature: TimeSignature) -> String {
+    fn render_rest_with_measures(
+        &self,
+        duration: Duration,
+        start_pos: Duration,
+        time_signature: TimeSignature,
+    ) -> String {
         use music_primitives::MusicNat;
         use num::rational::Ratio;
 
@@ -411,12 +475,17 @@ impl LilyPondRenderer {
         }
 
         // Otherwise, split at measure boundary
-        let duration_before_boundary = Duration::from_beats_with_ts(beats_until_next_measure, time_signature);
+        let duration_before_boundary =
+            Duration::from_beats_with_ts(beats_until_next_measure, time_signature);
         let duration_after_boundary = duration - duration_before_boundary;
 
         // Render both parts WITHOUT tie (rests don't tie)
         let first_part = self.render_rest(duration_before_boundary);
-        let second_part = self.render_rest_with_measures(duration_after_boundary, start_pos + duration_before_boundary, time_signature);
+        let second_part = self.render_rest_with_measures(
+            duration_after_boundary,
+            start_pos + duration_before_boundary,
+            time_signature,
+        );
 
         format!("{} {}", first_part, second_part)
     }
@@ -542,7 +611,12 @@ impl LilyPondRenderer {
             };
             treble_comp.try_merge_all_tracks();
             let treble_tracks = treble_comp.tracks;
-            self.render_staff_voices(output, &treble_tracks.iter().collect::<Vec<_>>(), ts, "        ");
+            self.render_staff_voices(
+                output,
+                &treble_tracks.iter().collect::<Vec<_>>(),
+                ts,
+                "        ",
+            );
             writeln!(output, "        \\bar \"|.\"").unwrap();
             writeln!(output, "      }}").unwrap();
         }
@@ -558,7 +632,12 @@ impl LilyPondRenderer {
             };
             bass_comp.try_merge_all_tracks();
             let bass_tracks = bass_comp.tracks;
-            self.render_staff_voices(output, &bass_tracks.iter().collect::<Vec<_>>(), ts, "        ");
+            self.render_staff_voices(
+                output,
+                &bass_tracks.iter().collect::<Vec<_>>(),
+                ts,
+                "        ",
+            );
             writeln!(output, "        \\bar \"|.\"").unwrap();
             writeln!(output, "      }}").unwrap();
         }
@@ -579,7 +658,7 @@ impl LilyPondRenderer {
             .max();
 
         match highest_semitone {
-            None => true, // empty track → treble by default
+            None => true,           // empty track → treble by default
             Some(s) => s >= 4 * 12, // C4 semitone value = 48
         }
     }
@@ -826,13 +905,15 @@ mod tests {
 
 #[cfg(test)]
 mod render_fun {
-    use std::fs;
-    use num::rational::Ratio;
-    use num::Zero;
-    use crate::cfg::{Grammar, MusicPrimitive, MusicString, GrammarDerivationConfig, Performer, Symbol};
+    use crate::cfg::{
+        Grammar, GrammarDerivationConfig, MusicPrimitive, MusicString, Performer, Symbol,
+    };
     use crate::compose_from_grammar;
     use crate::lilypond::{LilyPondConfig, call_lilypond_cli, render_to_lilypond};
     use music_primitives::{Duration, TimeSignature};
+    use num::Zero;
+    use num::rational::Ratio;
+    use std::fs;
 
     // #[test]
     fn render_all_examples() {
@@ -871,9 +952,11 @@ mod render_fun {
                         max_depth: 10,
                     },
                     &mut rng,
-                ).unwrap();
+                )
+                .unwrap();
 
-                let lilypond_filename = format!("data/lilypond/examples/{}.ly", filename_wo_extension);
+                let lilypond_filename =
+                    format!("data/lilypond/examples/{}.ly", filename_wo_extension);
                 render_to_lilypond(
                     composition,
                     lilypond_filename.as_str(),
@@ -883,9 +966,10 @@ mod render_fun {
                         ..LilyPondConfig::default()
                     }),
                 )
-                    .unwrap();
+                .unwrap();
 
-                call_lilypond_cli(lilypond_filename.as_str(), "data/lilypond/output", true).unwrap();
+                call_lilypond_cli(lilypond_filename.as_str(), "data/lilypond/output", true)
+                    .unwrap();
             }
         }
 
@@ -907,7 +991,7 @@ mod render_fun {
             },
             &mut rng,
         )
-            .unwrap();
+        .unwrap();
         let lilypond_filename = format!("data/lilypond/examples/{}.ly", filename);
         render_to_lilypond(
             composition,
@@ -918,7 +1002,7 @@ mod render_fun {
                 ..LilyPondConfig::default()
             }),
         )
-            .unwrap();
+        .unwrap();
 
         call_lilypond_cli(lilypond_filename.as_str(), "data/lilypond/output", true).unwrap();
     }
@@ -949,7 +1033,15 @@ mod render_fun {
         for event in all_events {
             println!("\t{:?}", event);
         }
-        assert_eq!(composition.get_duration(), Duration::measures_and_beats_with_ts(1, Ratio::from_integer(2), TimeSignature::common()), "Total composition length is 1.5 measures");
+        assert_eq!(
+            composition.get_duration(),
+            Duration::measures_and_beats_with_ts(
+                1,
+                Ratio::from_integer(2),
+                TimeSignature::common()
+            ),
+            "Total composition length is 1.5 measures"
+        );
         let lilypond_filename = format!("data/lilypond/examples/{}.ly", filename);
         render_to_lilypond(
             composition,

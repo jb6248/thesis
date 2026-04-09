@@ -32,10 +32,10 @@ pub fn template_7(trials: usize, distance_bias: f64, experiment_location: &str) 
     // this uses hierarchical analysis of prolongational trees
     // --- constants ---
     let grammar_file    = &format!("{experiment_location}/grammar.mt");
-    let population_size   = 200;
-    let generations       = 1_000;
-    let p_crossover       = 0.5;
-    let p_mutation        = 0.2;
+    let population_size   = 100;
+    let generations       = 500;
+    let p_crossover       = 0.8;
+    let p_mutation        = 0.1;
     let iterations        = 5;
     let max_depth         = 10;
 

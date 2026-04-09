@@ -1,6 +1,49 @@
+use std::process::Command;
+use rayon::prelude::*;
 use crate::distance::pitch_class_space::PitchClassSpace;
 use crate::distance::pitch_class_space::SpaceLevel::Chromatic;
 use music_primitives::{Pitch, PitchClass};
+
+pub fn render_midi_to_samples(experiment_location: &str) {
+    let lily_dir    = format!("{experiment_location}/lilypond_output");
+    let samples_dir = format!("{experiment_location}/samples");
+    let soundfont   = format!("{experiment_location}/soundfont.sf2");
+
+    std::fs::create_dir_all(&samples_dir).expect("Failed to create samples/");
+
+    let midi_files: Vec<_> = std::fs::read_dir(&lily_dir)
+        .unwrap_or_else(|e| panic!("Failed to read {lily_dir}: {e}"))
+        .filter_map(|entry| {
+            let entry = entry.ok()?;
+            let path = entry.path();
+            if path.extension()?.to_str()? == "midi" {
+                Some(path)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    println!("Rendering {} MIDI files to MP3...", midi_files.len());
+
+    midi_files.par_iter().for_each(|midi_path| {
+        let stem = midi_path.file_stem()
+            .expect("midi file has no stem")
+            .to_string_lossy();
+        let mp3_path = format!("{samples_dir}/{stem}.mp3");
+
+        let status = Command::new("fluidsynth")
+            .args(["-ni", "-r", "44100", "-F", &mp3_path, &soundfont, midi_path.to_str().unwrap()])
+            .status()
+            .unwrap_or_else(|e| panic!("Failed to launch fluidsynth for {stem}: {e}"));
+
+        if !status.success() {
+            eprintln!("fluidsynth exited with non-zero status for {stem}");
+        }
+    });
+
+    println!("Done. MP3 samples -> {samples_dir}/");
+}
 
 fn generate_all_chords() -> Vec<String> {
     // It's either a major or minor region

@@ -12,6 +12,7 @@ use music_turtle_lang::composition::Volume;
 use music_turtle_lang::lilypond::{call_lilypond_cli, render_to_lilypond, LilyPondConfig};
 use crate::template_6::template_6;
 use crate::template_7::template_7;
+use crate::util::render_midi_to_samples;
 
 fn main() {
     // we are going to run a simulation
@@ -21,7 +22,8 @@ fn main() {
     // template_5(3, 0.4, "data/experiments/5.4");
     // template_5(3, 0.4, "data/experiments/6");
     // template_6(3, 0.4, "data/experiments/7");
-    template_7(1, 0.4, "data/experiments/8");
+    // template_7(1, 0.4, "data/experiments/8");
+    render_midi_to_samples("data/experiments/8");
 }
 
 /// Renders a GrammarDerivationGenome2 to a LilyPond file and compiles it.
