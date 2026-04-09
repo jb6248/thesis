@@ -1,6 +1,5 @@
-start SS
+start S
 
-SS = [T12][S]
 S = A A
 A = B B
 B = C C

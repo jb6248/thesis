@@ -14,19 +14,15 @@ use crate::genetic_simulation::analysis::prolongational_tree::find_best_tension_
 pub const CHORD_PREFIX: &str = "#";
 pub const INITIAL_CHORD: PitchClassSpace = PitchClassSpace::c_maj();
 
-pub struct AnalysisParams4 {
+pub struct AnalysisParams5 {
     /// How much to influence distance of farthest chord in fitness
     pub(crate) distance_bias: f64
 }
 
 #[derive(Debug, Clone)]
-pub struct GrammarDerivationGenome4(pub GrammarDerivation);
+pub struct GrammarDerivationGenome5(pub GrammarDerivation);
 
-fn print_vec_plain<T: Display>(vec: Vec<T>, delimiter: &str) {
-
-}
-
-impl GrammarDerivationGenome4 {
+impl GrammarDerivationGenome5 {
     pub fn show_chord_progression(&self) {
         let chord_progression = extract_symbolic_chord_structure(&self.0, CHORD_PREFIX);
         println!("{:?}", chord_progression.join(" "));
@@ -52,12 +48,12 @@ impl GrammarDerivationGenome4 {
         println_tree!(right);
     }
 }
-impl Genome for GrammarDerivationGenome4 {
-    type Config = Arc<(GrammarDerivationGenerator, AnalysisParams4)>;
+impl Genome for GrammarDerivationGenome5 {
+    type Config = Arc<(GrammarDerivationGenerator, AnalysisParams5)>;
 
     fn generate(config: &Self::Config, rng: &mut impl Rng) -> Self {
         let derivation = config.0.produce(rng);
-        GrammarDerivationGenome4(derivation)
+        GrammarDerivationGenome5(derivation)
     }
 
     fn mutate(&mut self, config: &Self::Config, rng: &mut impl Rng) {
@@ -83,7 +79,7 @@ impl Genome for GrammarDerivationGenome4 {
                     std::mem::swap(self_derivation, other_derivation);
                     // Prune to enforce max_depth after the subtree swap.
                     config.0.prune(&mut current);
-                    return GrammarDerivationGenome4(current);
+                    return GrammarDerivationGenome5(current);
                 }
                 // otherwise... choose something else (this seems like it could take a while)
                 // todo: intersect NTs for each and then pick from intersection
@@ -105,6 +101,9 @@ impl Genome for GrammarDerivationGenome4 {
         let ending_tonic_penalty = chord_progression.last()
             .map(|last| INITIAL_CHORD.total_distance(last))
             .unwrap_or(0) as f64;
+        let starting_tonic_penalty = chord_progression.first()
+            .map(|first| INITIAL_CHORD.total_distance(first))
+            .unwrap_or(0) as f64;
         
         let farthest_chord_dist = chord_progression.iter()
             .map(|chord| INITIAL_CHORD.total_distance(chord))
@@ -112,6 +111,6 @@ impl Genome for GrammarDerivationGenome4 {
             .unwrap_or(0) as f64;
         
         // we like distance, so we'll add it to the tension score
-        tension_score + farthest_chord_dist * pms.distance_bias - ending_tonic_penalty
+        tension_score + farthest_chord_dist * pms.distance_bias - ending_tonic_penalty - starting_tonic_penalty
     }
 }

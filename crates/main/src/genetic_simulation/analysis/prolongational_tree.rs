@@ -1,17 +1,31 @@
 use crate::distance::pitch_class_space::PitchClassSpace;
 use std::collections::HashMap;
+use std::fmt::{Display, Formatter};
+use display_tree::DisplayTree;
 
 /// Prolongational Tree
+#[derive(Debug, DisplayTree)]
 pub enum Tree<T> {
-    Leaf(T),
-    Tensing(Box<Tree<T>>, Box<Tree<T>>, Strength),
-    Relaxing(Box<Tree<T>>, Box<Tree<T>>, Strength),
+    Leaf(#[ignore_field] T),
+    Tensing(#[tree] Box<Tree<T>>, #[tree] Box<Tree<T>>, Strength),
+    Relaxing(#[tree] Box<Tree<T>>, #[tree] Box<Tree<T>>, Strength),
 }
 
+#[derive(Debug)]
 pub enum Strength {
     Strong,
     Weak,
     Progression,
+}
+
+impl Display for Strength {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Strength::Strong => write!(f, "strong"),
+            Strength::Weak => write!(f, "weak"),
+            Strength::Progression => write!(f, "progression"),
+        }
+    }
 }
 
 /// Find the path from the root to the most distant chord, minimizing the total distance traveled.
@@ -104,6 +118,15 @@ impl<T> Tree<T> {
             self.count_relaxing()
         }
     }
+
+    pub fn count_leaves(&self) -> usize {
+        match self {
+            Tree::Leaf(_) => 1,
+            Tree::Tensing(left, right, _) | Tree::Relaxing(left, right, _) => {
+                left.count_leaves() + right.count_leaves()
+            }
+        }
+    }
 }
 
 impl<T: Clone> Tree<T> {
@@ -181,18 +204,18 @@ pub fn build_inter_sequence_prolongational_tree(
     left_chord: &PitchClassSpace,
     inter_chords: &Vec<PitchClassSpace>,
     right_chord: &PitchClassSpace,
-) -> Tree<()> {
+) -> Tree<usize> {
     if inter_chords.is_empty() {
         // if there are no inter-chords, just return the branching for the two chords
         return join_with_tensing(
             root,
-            (Tree::Leaf(()), left_chord),
-            (Tree::Leaf(()), right_chord),
+            (Tree::Leaf(0), left_chord),
+            (Tree::Leaf(0), right_chord),
         );
     }
     // try every pivot and see which one makes the most sense based on the tensing
     let mut best_count = usize::MAX;
-    let mut best_tree = Tree::Leaf(());
+    let mut best_tree = Tree::Leaf(0);
     for i in 0..inter_chords.len() {
         let is_first = i == 0;
         let is_last = i == inter_chords.len() - 1;
@@ -210,7 +233,7 @@ pub fn build_inter_sequence_prolongational_tree(
                 pivot,
             );
             let right_tree = if is_last {
-                Tree::Leaf(())
+                Tree::Leaf(0)
             } else {
                 build_inter_sequence_prolongational_tree(
                     tensing,
@@ -229,7 +252,7 @@ pub fn build_inter_sequence_prolongational_tree(
         } else {
             // recursive for (left, pivot) and (pivot + 1, right)
             let left_tree = if is_first {
-                Tree::Leaf(())
+                Tree::Leaf(0)
             } else {
                 build_inter_sequence_prolongational_tree(
                     tensing,
@@ -264,12 +287,12 @@ pub fn build_full_prolongational_tree(
     chords: &Vec<PitchClassSpace>,
     root: &PitchClassSpace,
     tensing: bool,
-) -> Option<Tree<()>> {
+) -> Option<Tree<usize>> {
     if chords.len() == 0 {
         return None;
     }
     if chords.len() == 1 {
-        return Some(Tree::Leaf(()));
+        return Some(Tree::Leaf(0));
     }
     let path = get_min_dist_path(chords);
     let mut tree = None;
@@ -301,12 +324,12 @@ pub fn build_full_prolongational_tree(
 pub fn find_best_tension_relaxation_split_and_score(
     chords: &Vec<PitchClassSpace>,
     root: &PitchClassSpace,
-) -> (usize, Tree<()>, Tree<()>) {
+) -> (usize, Tree<usize>, Tree<usize>) {
     if chords.len() < 4 {
-        return (0, Tree::Leaf(()), Tree::Leaf(()));
+        return (0, Tree::Leaf(0), Tree::Leaf(3));
     }
     let mut best_score = 0;
-    let mut best_sol = (Tree::Leaf(()), Tree::Leaf(()));
+    let mut best_sol = (Tree::Leaf(0), Tree::Leaf(0));
     for split in 2..chords.len() - 1 {
         // where `split` represents the beginning of the relaxing
         let left_chords = &chords[0..split].to_vec();
@@ -317,7 +340,7 @@ pub fn find_best_tension_relaxation_split_and_score(
             + right_tree.as_ref().map(|t| t.count_relaxing()).unwrap_or(0);
         if total > best_score {
             best_score = total;
-            best_sol = (left_tree.unwrap_or(Tree::Leaf(())), right_tree.unwrap_or(Tree::Leaf(())));
+            best_sol = (left_tree.unwrap_or(Tree::Leaf(0)), right_tree.unwrap_or(Tree::Leaf(0)));
         }
     }
     (best_score, best_sol.0, best_sol.1)

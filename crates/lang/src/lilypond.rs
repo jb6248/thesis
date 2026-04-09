@@ -73,7 +73,7 @@ pub struct LilyPondConfig {
     /// When true, render all tracks into a two-staff grand staff (treble + bass).
     /// Each track is assigned to treble or bass clef based on its pitch range:
     /// if the track's highest pitch is >= C4 (middle C) it goes in treble, otherwise bass.
-    /// Multiple tracks on the same clef are rendered as separate LilyPond voices.
+    /// Multiple tracks are attempted to be merged. Then each track is rendered as a separate voice.
     pub piano_staff: bool,
 }
 
@@ -826,12 +826,72 @@ mod tests {
 
 #[cfg(test)]
 mod render_fun {
+    use std::fs;
     use num::rational::Ratio;
     use num::Zero;
-    use crate::cfg::{Grammar, MusicPrimitive, MusicString, GrammarDerivationConfig, Performer};
+    use crate::cfg::{Grammar, MusicPrimitive, MusicString, GrammarDerivationConfig, Performer, Symbol};
     use crate::compose_from_grammar;
     use crate::lilypond::{LilyPondConfig, call_lilypond_cli, render_to_lilypond};
     use music_primitives::{Duration, TimeSignature};
+
+    // #[test]
+    fn render_all_examples() {
+        let examples_dir = "data/grammar/examples";
+
+        // Read all files in the examples directory
+        let entries = fs::read_dir(examples_dir).expect("Failed to read examples directory");
+
+        let mut file_count = 0;
+        let mut rng = rand::rng();
+        for entry in entries {
+            let entry = entry.expect("Failed to read directory entry");
+            let path = entry.path();
+
+            // Only process .mt files
+            if path.extension().and_then(|s| s.to_str()) == Some("mt") {
+                file_count += 1;
+                let file_name = path.file_name().unwrap().to_str().unwrap();
+
+                // Read the file contents
+                let contents = fs::read_to_string(&path)
+                    .expect(&format!("Failed to read file: {}", file_name));
+
+                // get filename without extension
+                let filename_wo_extension = file_name.strip_suffix(".mt").unwrap();
+
+                // Parse the grammar
+                let result = contents.parse::<Grammar>();
+
+                let composition = compose_from_grammar(
+                    format!("data/grammar/examples/{}.mt", filename_wo_extension).as_str(),
+                    GrammarDerivationConfig {
+                        iterations: 8,
+                        panic_on_bad_production: true,
+                        rounded: false,
+                        max_depth: 10,
+                    },
+                    &mut rng,
+                ).unwrap();
+
+                let lilypond_filename = format!("data/lilypond/examples/{}.ly", filename_wo_extension);
+                render_to_lilypond(
+                    composition,
+                    lilypond_filename.as_str(),
+                    Some(LilyPondConfig {
+                        write_dynamics: false,
+                        piano_staff: true,
+                        ..LilyPondConfig::default()
+                    }),
+                )
+                    .unwrap();
+
+                call_lilypond_cli(lilypond_filename.as_str(), "data/lilypond/output", true).unwrap();
+            }
+        }
+
+        // Ensure we actually tested some files
+        assert!(file_count > 0, "No .mt files found in examples directory");
+    }
 
     #[test]
     fn render_test_play() {
@@ -840,7 +900,7 @@ mod render_fun {
         let composition = compose_from_grammar(
             format!("data/grammar/examples/{}.mt", filename).as_str(),
             GrammarDerivationConfig {
-                iterations: 6,
+                iterations: 8,
                 panic_on_bad_production: true,
                 rounded: false,
                 max_depth: 10,
@@ -848,15 +908,6 @@ mod render_fun {
             &mut rng,
         )
             .unwrap();
-        let mut all_events = vec![];
-        for track in composition.tracks.iter() {
-            all_events.extend(track.events.clone());
-        }
-        all_events.sort_by(|a, b| a.start.cmp(&b.start));
-        println!("All events in composition (sorted by start time):");
-        for event in all_events {
-            println!("\t{:?}", event);
-        }
         let lilypond_filename = format!("data/lilypond/examples/{}.ly", filename);
         render_to_lilypond(
             composition,
