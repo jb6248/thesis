@@ -22,8 +22,8 @@ fn main() {
     // template_5(3, 0.4, "data/experiments/5.4");
     // template_5(3, 0.4, "data/experiments/6");
     // template_6(3, 0.4, "data/experiments/7");
-    // template_7(1, 0.4, "data/experiments/8");
-    render_midi_to_samples("data/experiments/8");
+    template_7(1, 0.4, "data/experiments/8");
+    // render_midi_to_samples("data/experiments/8");
 }
 
 /// Renders a GrammarDerivationGenome2 to a LilyPond file and compiles it.
